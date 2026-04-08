@@ -19,7 +19,7 @@ def ensure_dir(path: str):
         os.makedirs(path)
 
 
-def load_filtered_mnist_test(data_root: str):
+def load_filtered_mnist_test(data_root: str, digits):
     transform = transforms.ToTensor()
     test = datasets.MNIST(
         data_root,
@@ -28,7 +28,11 @@ def load_filtered_mnist_test(data_root: str):
         transform=transform,
     )
 
-    mask = (test.targets == 1) | (test.targets == 2) | (test.targets == 3)
+    digits = list(digits)
+    mask = torch.zeros_like(test.targets, dtype=torch.bool)
+    for d in digits:
+        mask |= (test.targets == d)
+
     idx = mask.nonzero(as_tuple=False).view(-1)
     return Subset(test, idx)
 
@@ -54,7 +58,7 @@ def get_latent_mu(model, loader, device):
 
 
 # --------------------------------------------------
-# Main plotting function (call from notebook)
+# Main plotting function 
 # --------------------------------------------------
 
 def plot_vae_latent_alignment(
@@ -64,23 +68,35 @@ def plot_vae_latent_alignment(
     batch_size=256,
     device="cpu",
     save_path=None,
-    n_lines=200,
+    digits=None,
 ):
     """
-    Plots:
-    1) VAE A latent space
-    2) VAE B latent space
-    3) Overlay + correspondence lines
-
-    Designed for debugging alignment / symmetry issues.
+    Plots side-by-side latent spaces for VAE A and VAE B
+    using whatever digits the models were trained on.
     """
 
     device = torch.device(device)
 
     # --------------------------------------------------
+    # Infer digits if not provided
+    # --------------------------------------------------
+    if digits is None:
+        splits_path = f"{checkpoint_prefix}_splits.pt"
+        if os.path.exists(splits_path):
+            split_info = torch.load(splits_path, map_location="cpu")
+            digits = split_info["selected_digits"]
+        else:
+            raise ValueError(
+                "digits=None, but no split file found. "
+                "Pass digits explicitly or provide *_splits.pt."
+            )
+
+    digits = list(digits)
+
+    # --------------------------------------------------
     # Load test data
     # --------------------------------------------------
-    test_subset = load_filtered_mnist_test(data_root)
+    test_subset = load_filtered_mnist_test(data_root, digits)
     test_loader = DataLoader(
         test_subset,
         batch_size=batch_size,
@@ -91,12 +107,14 @@ def plot_vae_latent_alignment(
     # --------------------------------------------------
     # Load models
     # --------------------------------------------------
-    vaeA = SupervisedVAE(latent_dim=latent_dim).to(device)
+    num_classes = len(digits)
+
+    vaeA = SupervisedVAE(latent_dim=latent_dim, num_classes=num_classes).to(device)
     vaeA.load_state_dict(
         torch.load(f"{checkpoint_prefix}_vaeA.pt", map_location=device)
     )
 
-    vaeB = SupervisedVAE(latent_dim=latent_dim).to(device)
+    vaeB = SupervisedVAE(latent_dim=latent_dim, num_classes=num_classes).to(device)
     vaeB.load_state_dict(
         torch.load(f"{checkpoint_prefix}_vaeB.pt", map_location=device)
     )
@@ -108,7 +126,7 @@ def plot_vae_latent_alignment(
     zB_full, yB = get_latent_mu(vaeB, test_loader, device)
 
     # --------------------------------------------------
-    # Shared PCA (CRITICAL)
+    # Shared PCA
     # --------------------------------------------------
     Z = torch.cat([zA_full, zB_full], dim=0).numpy()
 
@@ -126,7 +144,6 @@ def plot_vae_latent_alignment(
     # --------------------------------------------------
     fig, axes = plt.subplots(1, 2, figsize=(10, 5), sharex=True, sharey=True)
 
-    # --- VAE A ---
     sc1 = axes[0].scatter(
         zA[:, 0], zA[:, 1],
         c=yA,
@@ -134,9 +151,8 @@ def plot_vae_latent_alignment(
         s=5,
         alpha=0.7
     )
-    axes[0].set_title("VAE A")
+    axes[0].set_title(f"VAE A (test digits {digits})")
 
-    # --- VAE B ---
     axes[1].scatter(
         zB[:, 0], zB[:, 1],
         c=yB,
@@ -144,12 +160,8 @@ def plot_vae_latent_alignment(
         s=5,
         alpha=0.7
     )
-    axes[1].set_title("VAE B")
+    axes[1].set_title(f"VAE B (test digits {digits})")
 
-
-    # --------------------------------------------------
-    # Shared limits
-    # --------------------------------------------------
     x_min = min(zA[:, 0].min(), zB[:, 0].min())
     x_max = max(zA[:, 0].max(), zB[:, 0].max())
     y_min = min(zA[:, 1].min(), zB[:, 1].min())
@@ -159,27 +171,20 @@ def plot_vae_latent_alignment(
         ax.set_xlim(x_min, x_max)
         ax.set_ylim(y_min, y_max)
 
-    # --------------------------------------------------
-    # Legend
-    # --------------------------------------------------
     labels = np.unique(np.concatenate([yA, yB]))
     cmap = sc1.cmap
     norm = sc1.norm
 
-    handles = []
-    for lbl in labels:
-        handles.append(
-            mpatches.Patch(color=cmap(norm(lbl)), label=str(int(lbl)))
-        )
+    handles = [
+        mpatches.Patch(color=cmap(norm(lbl)), label=str(int(lbl)))
+        for lbl in labels
+    ]
 
     for ax in axes:
         ax.legend(handles=handles, title="Digit")
 
     plt.tight_layout()
 
-    # --------------------------------------------------
-    # Save or show
-    # --------------------------------------------------
     if save_path is not None:
         ensure_dir(os.path.dirname(save_path))
         plt.savefig(save_path)

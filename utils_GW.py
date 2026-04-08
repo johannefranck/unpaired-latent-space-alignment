@@ -137,6 +137,8 @@ def compute_geodesics(points, is_sphere=True):
     Computes the pairwise intra-distance matrix D.
     Inputs: points (N x 3), is_sphere (bool toggle)
     Outputs: D (N x N distance matrix)
+
+    Used in the initial GW4 experiments only.
     """
     if is_sphere:
         # Vectorized spherical distance: arccos(Xi * Xj)
@@ -552,3 +554,134 @@ def optimize_rotation(initial_params, points1, points2, coupling_P, pairs=None):
     return res.x
 
 
+
+
+# --- add these to utils_GW.py ---
+
+import torch
+import torch.nn as nn
+
+
+def coupling_to_barycentric_targets(X_src, X_tgt, P, eps=1e-12):
+    """
+    Build soft targets in source space from a GW coupling.
+
+    Inputs
+    ------
+    X_src : (N, d) source anchors, e.g. zA_anchor
+    X_tgt : (M, d) target anchors, e.g. zB_anchor
+    P     : (N, M) coupling matrix
+
+    Returns
+    -------
+    X_tgt : (M, d)
+    Y_bar : (M, d), barycentric targets in source space
+    """
+    X_src = np.asarray(X_src, dtype=np.float64)
+    X_tgt = np.asarray(X_tgt, dtype=np.float64)
+    P = np.asarray(P, dtype=np.float64)
+
+    col_mass = P.sum(axis=0, keepdims=True)
+    col_mass = np.maximum(col_mass, eps)
+
+    Y_bar = (P.T @ X_src) / col_mass.T
+    return X_tgt.astype(np.float32), Y_bar.astype(np.float32)
+
+
+class ResidualMap(nn.Module):
+    """
+    T_theta(z) = z + u_theta(z)
+    """
+    def __init__(self, latent_dim, hidden_dim=32):
+        super().__init__()
+        self.displacement = nn.Sequential(
+            nn.Linear(latent_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, latent_dim),
+        )
+
+    def forward(self, z):
+        return z + self.displacement(z)
+
+    def displacement_field(self, z):
+        return self.displacement(z)
+
+
+def _pairwise_distance_distortion_loss(z_in, z_out):
+    """
+    Penalize distortion of pairwise Euclidean distances.
+    """
+    Din = torch.cdist(z_in, z_in, p=2)
+    Dout = torch.cdist(z_out, z_out, p=2)
+    return ((Dout - Din) ** 2).mean()
+
+
+def train_residual_map_from_coupling(
+    X_src,
+    X_tgt,
+    P,
+    hidden_dim=32,
+    lr=1e-3,
+    weight_decay=1e-4,
+    epochs=2000,
+    lambda_disp=1e-2,
+    lambda_geom=1e-1,
+    device="cpu",
+    verbose=False,
+):
+    """
+    Train a constrained nonlinear map from target -> source using GW barycentric targets.
+
+    Objective
+    ---------
+    fit  : map target anchors to GW barycentric targets in source space
+    disp : keep displacement u_theta(z) small
+    geom : discourage collapse by preserving pairwise distances in target space
+    """
+    X_tgt_np, Y_bar_np = coupling_to_barycentric_targets(X_src, X_tgt, P)
+
+    X_tgt_t = torch.tensor(X_tgt_np, dtype=torch.float32, device=device)
+    Y_bar_t = torch.tensor(Y_bar_np, dtype=torch.float32, device=device)
+
+    model = ResidualMap(latent_dim=X_tgt_t.shape[1], hidden_dim=hidden_dim).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    mse = nn.MSELoss()
+
+    model.train()
+    for epoch in range(epochs):
+        optimizer.zero_grad()
+
+        Y_pred = model(X_tgt_t)
+        U = model.displacement_field(X_tgt_t)
+
+        loss_fit = mse(Y_pred, Y_bar_t)
+        loss_disp = (U ** 2).mean()
+        loss_geom = _pairwise_distance_distortion_loss(X_tgt_t, Y_pred)
+
+        loss = loss_fit + lambda_disp * loss_disp + lambda_geom * loss_geom
+        loss.backward()
+        optimizer.step()
+
+        if verbose and ((epoch + 1) % 200 == 0 or epoch == 0):
+            print(
+                f"[ResidualMap epoch {epoch+1:4d}] "
+                f"loss={loss.item():.6f} "
+                f"fit={loss_fit.item():.6f} "
+                f"disp={loss_disp.item():.6f} "
+                f"geom={loss_geom.item():.6f}"
+            )
+
+    return model
+
+
+def apply_residual_map(model, X, device="cpu"):
+    """
+    Apply learned residual map to any set of target-space points.
+    """
+    X_t = torch.tensor(np.asarray(X), dtype=torch.float32, device=device)
+    model.eval()
+    with torch.no_grad():
+        Y = model(X_t).cpu().numpy()
+    return Y
