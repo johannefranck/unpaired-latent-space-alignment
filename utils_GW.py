@@ -1,11 +1,18 @@
 import numpy as np
 import scipy
 import matplotlib.pyplot as plt
+import torch
+import torch.nn as nn
+import zuko
+
+
 
 from scipy.optimize import minimize
 from scipy.stats import vonmises_fisher
 from scipy.spatial.distance import pdist, squareform
+from contextlib import nullcontext
 
+from geodesics import linear_path_energy
 from colors import color_segment
 
 blue_pink = color_segment()
@@ -274,61 +281,9 @@ def fit_affine_map_from_coupling(X_src, X_tgt, P, reg=1e-8):
 
     return W, t
 
-def learn_labelwise_gw_maps(zA, zB, y, labels=None, epsilon=0.02, threshold=1e-6):
-    """
-    Objective: Learn one class-conditional GW map per label.
-    Logic: For each label, first solve a GW coupling between the two latent
-           distributions, then fit an affine map from the target latent space
-           into the source latent space using the learned coupling.
-    Inputs: zA (N x d), zB (N x d), y (N,), labels (optional), epsilon, threshold
-    Outputs: maps (dict), couplings (dict), losses (dict)
-    """
-    if labels is None:
-        labels = np.unique(y)
-
-    maps = {}
-    couplings = {}
-    losses = {}
-
-    for k in labels:
-        XA = zA[y == k]
-        XB = zB[y == k]
-
-        D_A = compute_pairwise_distances(XA)
-        D_B = compute_pairwise_distances(XB)
-
-        P, gw_loss = solve_gw_coupling(
-            D_A,
-            D_B,
-            epsilon=epsilon,
-            threshold=threshold
-        )
-
-        W, t = fit_affine_map_from_coupling(XA, XB, P)
-
-        maps[k] = {"W": W, "t": t}
-        couplings[k] = P
-        losses[k] = gw_loss
-
-    return maps, couplings, losses
 
 
-def apply_labelwise_maps(z, y, maps):
-    """
-    Objective: Apply the learned class-conditional affine maps to a latent dataset.
-    Logic: Uses the label of each point to choose the corresponding learned map.
-    Inputs: z (N x d), y (N,), maps (dict)
-    Outputs: z_aligned (N x d)
-    """
-    z_aligned = np.zeros_like(z)
 
-    for k, params in maps.items():
-        mask = (y == k)
-        W = params["W"]
-        t = params["t"]
-        z_aligned[mask] = z[mask] @ W + t
-
-    return z_aligned
 
 # --- distributions ---
 
@@ -556,10 +511,6 @@ def optimize_rotation(initial_params, points1, points2, coupling_P, pairs=None):
 
 
 
-# --- add these to utils_GW.py ---
-
-import torch
-import torch.nn as nn
 
 
 def coupling_to_barycentric_targets(X_src, X_tgt, P, eps=1e-12):
@@ -568,8 +519,8 @@ def coupling_to_barycentric_targets(X_src, X_tgt, P, eps=1e-12):
 
     Inputs
     ------
-    X_src : (N, d) source anchors, e.g. zA_anchor
-    X_tgt : (M, d) target anchors, e.g. zB_anchor
+    X_src : (N, d) source anchors
+    X_tgt : (M, d) target anchors
     P     : (N, M) coupling matrix
 
     Returns
@@ -592,7 +543,7 @@ class ResidualMap(nn.Module):
     """
     T_theta(z) = z + u_theta(z)
     """
-    def __init__(self, latent_dim, hidden_dim=32):
+    def __init__(self, latent_dim, hidden_dim=32, identity_init=False):
         super().__init__()
         self.displacement = nn.Sequential(
             nn.Linear(latent_dim, hidden_dim),
@@ -601,6 +552,11 @@ class ResidualMap(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, latent_dim),
         )
+
+        if identity_init:
+            last_linear = self.displacement[-1]
+            nn.init.zeros_(last_linear.weight)
+            nn.init.zeros_(last_linear.bias)
 
     def forward(self, z):
         return z + self.displacement(z)
@@ -618,6 +574,86 @@ def _pairwise_distance_distortion_loss(z_in, z_out):
     return ((Dout - Din) ** 2).mean()
 
 
+def _pairwise_geodesic_distance_matrix(
+    model,
+    latent_points,
+    num_segments=20,
+    device="cpu",
+    detach=False,
+):
+    """
+    NxN matrix of approximate geodesic distances using decoder energy.
+
+    If detach=True, computation is done without gradients.
+    If detach=False, gradients flow through latent_points.
+    """
+    latent_points = latent_points.to(device)
+    n = latent_points.shape[0]
+    D = torch.zeros(n, n, dtype=latent_points.dtype, device=device)
+
+    model = model.to(device)
+    was_training = model.training
+    model.eval()
+
+    ctx = torch.no_grad() if detach else nullcontext()
+    with ctx:
+        for i in range(n):
+            for j in range(i + 1, n):
+                _, d_ij = linear_path_energy(
+                    model,
+                    latent_points[i],
+                    latent_points[j],
+                    num_segments=num_segments,
+                    device=device,
+                )
+                D[i, j] = d_ij
+                D[j, i] = d_ij
+
+    if was_training:
+        model.train()
+
+    return D
+
+
+def _pairwise_geodesic_distortion_loss(
+    model_in,
+    z_in,
+    model_out,
+    z_out,
+    num_segments=20,
+    device="cpu",
+    D_in_precomputed=None,
+):
+    """
+    Penalize distortion of pairwise decoder-geodesic distances:
+        || D_out - D_in ||^2
+
+    model_in  : decoder used for the original target space (e.g. VAE_B)
+    z_in      : original target points (e.g. zB anchors)
+    model_out : decoder used for mapped points in source space (e.g. VAE_A)
+    z_out     : mapped target points T(zB)
+    """
+    if D_in_precomputed is None:
+        D_in = _pairwise_geodesic_distance_matrix(
+            model_in,
+            z_in,
+            num_segments=num_segments,
+            device=device,
+            detach=True,
+        )
+    else:
+        D_in = D_in_precomputed
+
+    D_out = _pairwise_geodesic_distance_matrix(
+        model_out,
+        z_out,
+        num_segments=num_segments,
+        device=device,
+        detach=False,
+    )
+
+    return ((D_out - D_in) ** 2).mean()
+
 def train_residual_map_from_coupling(
     X_src,
     X_tgt,
@@ -630,24 +666,47 @@ def train_residual_map_from_coupling(
     lambda_geom=1e-1,
     device="cpu",
     verbose=False,
+    identity_init=False,
+    geom_metric="euclidean",   # "euclidean" or "geodesic"
+    model_src_geom=None,       # e.g. VAE_A
+    model_tgt_geom=None,       # e.g. VAE_B
+    num_segments=20,
 ):
     """
     Train a constrained nonlinear map from target -> source using GW barycentric targets.
 
-    Objective
-    ---------
     fit  : map target anchors to GW barycentric targets in source space
     disp : keep displacement u_theta(z) small
-    geom : discourage collapse by preserving pairwise distances in target space
+    geom : discourage collapse by preserving pairwise distances
+           either in Euclidean latent geometry or decoder-geodesic geometry
     """
     X_tgt_np, Y_bar_np = coupling_to_barycentric_targets(X_src, X_tgt, P)
 
     X_tgt_t = torch.tensor(X_tgt_np, dtype=torch.float32, device=device)
     Y_bar_t = torch.tensor(Y_bar_np, dtype=torch.float32, device=device)
 
-    model = ResidualMap(latent_dim=X_tgt_t.shape[1], hidden_dim=hidden_dim).to(device)
+    model = ResidualMap(
+        latent_dim=X_tgt_t.shape[1],
+        hidden_dim=hidden_dim,
+        identity_init=identity_init,
+    ).to(device)
+
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     mse = nn.MSELoss()
+
+    # Precompute target-space geodesic distances once, since X_tgt is fixed
+    D_tgt_geom = None
+    if lambda_geom > 0 and geom_metric == "geodesic":
+        assert model_tgt_geom is not None, "model_tgt_geom must be provided for geodesic geom loss"
+        assert model_src_geom is not None, "model_src_geom must be provided for geodesic geom loss"
+
+        D_tgt_geom = _pairwise_geodesic_distance_matrix(
+            model_tgt_geom,
+            X_tgt_t,
+            num_segments=num_segments,
+            device=device,
+            detach=True,
+        ).detach()
 
     model.train()
     for epoch in range(epochs):
@@ -658,13 +717,30 @@ def train_residual_map_from_coupling(
 
         loss_fit = mse(Y_pred, Y_bar_t)
         loss_disp = (U ** 2).mean()
-        loss_geom = _pairwise_distance_distortion_loss(X_tgt_t, Y_pred)
+
+        if lambda_geom > 0:
+            if geom_metric == "euclidean":
+                loss_geom = _pairwise_distance_distortion_loss(X_tgt_t, Y_pred)
+            elif geom_metric == "geodesic":
+                loss_geom = _pairwise_geodesic_distortion_loss(
+                    model_in=model_tgt_geom,
+                    z_in=X_tgt_t,
+                    model_out=model_src_geom,
+                    z_out=Y_pred,
+                    num_segments=num_segments,
+                    device=device,
+                    D_in_precomputed=D_tgt_geom,
+                )
+            else:
+                raise ValueError("geom_metric must be 'euclidean' or 'geodesic'")
+        else:
+            loss_geom = torch.tensor(0.0, device=device)
 
         loss = loss_fit + lambda_disp * loss_disp + lambda_geom * loss_geom
         loss.backward()
         optimizer.step()
 
-        if verbose and ((epoch + 1) % 200 == 0 or epoch == 0):
+        if verbose and ((epoch + 1) % 10 == 0 or epoch == 0):
             print(
                 f"[ResidualMap epoch {epoch+1:4d}] "
                 f"loss={loss.item():.6f} "
@@ -679,6 +755,164 @@ def train_residual_map_from_coupling(
 def apply_residual_map(model, X, device="cpu"):
     """
     Apply learned residual map to any set of target-space points.
+    """
+    X_t = torch.tensor(np.asarray(X), dtype=torch.float32, device=device)
+    model.eval()
+    with torch.no_grad():
+        Y = model(X_t).cpu().numpy()
+    return Y
+
+
+# ----- Normalizing Flow -----
+
+
+def coupling_fit_loss(X_src, Y_pred, P):
+    """
+    Direct coupling loss:
+        sum_ij P_ij ||Y_pred_j - X_src_i||^2
+
+    X_src : (N, d)
+    Y_pred: (M, d)
+    P     : (N, M)
+    """
+    diff = X_src[:, None, :] - Y_pred[None, :, :]
+    sqdist = (diff ** 2).sum(dim=2)
+    return (P * sqdist).sum()
+
+
+class ZukoFlowMap(nn.Module):
+    """
+    Invertible map T: R^d -> R^d using an unconditional zuko NSF.
+    """
+    def __init__(
+        self,
+        latent_dim,
+        transforms=4,
+        hidden_features=(64, 64),
+        bins=8,
+    ):
+        super().__init__()
+        self.latent_dim = latent_dim
+
+        # unconditional flow: context features = 0
+        self.flow = zuko.flows.NSF(
+            features=latent_dim,
+            context=0,
+            transforms=transforms,
+            hidden_features=list(hidden_features),
+            bins=bins,
+        )
+
+    def forward(self, z):
+        """
+        Apply the learned invertible map.
+        """
+        # zuko flows are lazy modules: calling returns a Distribution.
+        # For unconditional flow, use empty context with shape (batch, 0).
+        context = torch.empty(z.shape[0], 0, device=z.device, dtype=z.dtype)
+        dist = self.flow(context)
+        return dist.transform(z)
+
+    def inverse(self, x):
+        """
+        Apply inverse map.
+        """
+        context = torch.empty(x.shape[0], 0, device=x.device, dtype=x.dtype)
+        dist = self.flow(context)
+        return dist.transform.inv(x)
+
+
+def train_flow_map_from_coupling(
+    X_src,
+    X_tgt,
+    P,
+    transforms=4,
+    hidden_features=(64, 64),
+    bins=8,
+    lr=1e-3,
+    weight_decay=1e-5,
+    epochs=2000,
+    device="cpu",
+    verbose=False,
+    patience=200,
+    min_delta=1e-4,
+    restore_best=True,
+):
+    """
+    Train an invertible flow map from target -> source using only direct coupling loss.
+    Early stopping is based on the training fit loss.
+    """
+    X_src_t = torch.tensor(np.asarray(X_src), dtype=torch.float32, device=device)
+    X_tgt_t = torch.tensor(np.asarray(X_tgt), dtype=torch.float32, device=device)
+    P_t = torch.tensor(np.asarray(P), dtype=torch.float32, device=device)
+
+    model = ZukoFlowMap(
+        latent_dim=X_tgt_t.shape[1],
+        transforms=transforms,
+        hidden_features=hidden_features,
+        bins=bins,
+    ).to(device)
+
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=lr,
+        weight_decay=weight_decay,
+    )
+
+    best_loss = float("inf")
+    best_state = None
+    epochs_without_improvement = 0
+
+    model.train()
+    for epoch in range(epochs):
+        optimizer.zero_grad()
+
+        Y_pred = model(X_tgt_t)
+        loss_fit = coupling_fit_loss(X_src_t, Y_pred, P_t)
+
+        loss_fit.backward()
+        optimizer.step()
+
+        current_loss = loss_fit.item()
+
+        # early stopping logic
+        if current_loss < best_loss - min_delta:
+            best_loss = current_loss
+            epochs_without_improvement = 0
+            if restore_best:
+                best_state = {
+                    k: v.detach().cpu().clone()
+                    for k, v in model.state_dict().items()
+                }
+        else:
+            epochs_without_improvement += 1
+
+        if verbose and ((epoch + 1) % 200 == 0 or epoch == 0):
+            print(
+                f"[ZukoFlowMap epoch {epoch+1:4d}] "
+                f"fit={current_loss:.6f} "
+                f"best={best_loss:.6f} "
+                f"wait={epochs_without_improvement}"
+            )
+
+        if epochs_without_improvement >= patience:
+            if verbose:
+                print(
+                    f"[ZukoFlowMap early stop] "
+                    f"epoch={epoch+1} "
+                    f"best_fit={best_loss:.6f}"
+                )
+            break
+
+    if restore_best and best_state is not None:
+        model.load_state_dict(best_state)
+
+    return model
+
+
+def apply_flow_map(model, X, device="cpu"):
+    """
+    Apply learned flow map to any set of target-space points.
     """
     X_t = torch.tensor(np.asarray(X), dtype=torch.float32, device=device)
     model.eval()
