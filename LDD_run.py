@@ -1,106 +1,12 @@
 import os
+import json
 import argparse
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
 
-from colors import get_colors, get_single_color
-from geodesics import compute_geodesics_S2
+from colors import get_colors
 from LDD import LDD, signature_distance_matrix
-
-
-def sample_uniform_S2(n):
-    """
-    Sample n points uniformly on S^2.
-    """
-    x = torch.randn(n, 3)
-    return x / x.norm(dim=1, keepdim=True)
-
-
-def _orthonormal_basis(mu):
-    """
-    Build two unit vectors orthogonal to mu.
-    """
-    mu = np.asarray(mu, dtype=float)
-    mu = mu / np.linalg.norm(mu)
-
-    if np.allclose(mu, np.array([1.0, 0.0, 0.0])):
-        v1 = np.array([0.0, 1.0, 0.0])
-    else:
-        v1 = np.cross(mu, np.array([1.0, 0.0, 0.0]))
-        if np.linalg.norm(v1) < 1e-8:
-            v1 = np.cross(mu, np.array([0.0, 1.0, 0.0]))
-
-    v1 = v1 / np.linalg.norm(v1)
-    v2 = np.cross(mu, v1)
-    v2 = v2 / np.linalg.norm(v2)
-
-    return mu, v1, v2
-
-
-def sample_symmetric_ring_points(mu, layer_thetas, n_points):
-    """
-    Construct perfectly symmetric ring samples on S^2 around mu.
-
-    Uses the largest number of points that can be distributed equally
-    across all rings.
-    """
-    mu, v1, v2 = _orthonormal_basis(mu)
-    n_layers = len(layer_thetas)
-
-    points_per_layer = n_points // n_layers
-    used_points = points_per_layer * n_layers
-
-    layers = []
-    for theta in layer_thetas:
-        angles = np.linspace(0.0, 2.0 * np.pi, points_per_layer, endpoint=False)
-        layer = (
-            np.cos(theta) * mu[None, :]
-            + np.sin(theta) * np.cos(angles)[:, None] * v1[None, :]
-            + np.sin(theta) * np.sin(angles)[:, None] * v2[None, :]
-        )
-        layers.append(layer)
-
-    Z = np.vstack(layers)
-    return torch.as_tensor(Z, dtype=torch.float32), points_per_layer, used_points
-
-
-def sample_vmf_approx(mu, kappa, n):
-    """
-    Approximate isotropic vMF-like samples on S^2.
-
-    Uses Gaussian noise around mu followed by projection.
-    Good enough for experiments, but not exact vMF sampling.
-    """
-    mu = np.asarray(mu, dtype=float)
-    mu = mu / np.linalg.norm(mu)
-
-    X = kappa * mu[None, :] + np.random.randn(n, 3)
-    X = X / np.linalg.norm(X, axis=1, keepdims=True)
-    return torch.as_tensor(X, dtype=torch.float32)
-
-
-def sample_vmf_mixture_approx(mus, kappas, weights, n):
-    """
-    Sample from a mixture of approximate vMF-like components on S^2.
-    """
-    mus = [np.asarray(mu, dtype=float) / np.linalg.norm(mu) for mu in mus]
-    kappas = np.asarray(kappas, dtype=float)
-    weights = np.asarray(weights, dtype=float)
-    weights = weights / weights.sum()
-
-    comp_ids = np.random.choice(len(weights), size=n, p=weights)
-    X = np.zeros((n, 3), dtype=float)
-
-    for c in range(len(weights)):
-        idx = np.where(comp_ids == c)[0]
-        if len(idx) == 0:
-            continue
-        Xc = kappas[c] * mus[c][None, :] + np.random.randn(len(idx), 3)
-        Xc = Xc / np.linalg.norm(Xc, axis=1, keepdims=True)
-        X[idx] = Xc
-
-    return torch.as_tensor(X, dtype=torch.float32)
 
 
 def compute_summary(H, tau):
@@ -161,9 +67,9 @@ def print_summary(name, summary, tau):
     print(f"std   = {summary['dev_std']:.6f}")
 
 
-def plot_ldd_signatures(r, H, H_mean, savepath, title, n_plot=10):
+def plot_ldd_signatures(r, H, H_mean, savepath, title):
     """
-    Plot a subset of LDD signatures with the mean signature.
+    Plot all LDD signatures with the mean signature.
     """
     plt.figure(figsize=(6, 4))
     line_colors = get_colors(H.shape[0])
@@ -174,7 +80,7 @@ def plot_ldd_signatures(r, H, H_mean, savepath, title, n_plot=10):
             H[i].numpy(),
             alpha=0.25,
             linewidth=1.8,
-            color=line_colors[i]
+            color=line_colors[i],
         )
 
     plt.plot(
@@ -183,7 +89,7 @@ def plot_ldd_signatures(r, H, H_mean, savepath, title, n_plot=10):
         color="grey",
         linewidth=1.5,
         linestyle="--",
-        label="Mean signature"
+        label="Mean signature",
     )
 
     plt.xlabel("Radius")
@@ -195,32 +101,6 @@ def plot_ldd_signatures(r, H, H_mean, savepath, title, n_plot=10):
     plt.close()
 
 
-def save_ldd_checkpoint(experiment_name, H, r, center_idx, n_data_points, args):
-    """
-    Save LDD outputs and config for later reuse.
-    """
-    save_dir = os.path.join("checkpoints", "ldd", experiment_name)
-    os.makedirs(save_dir, exist_ok=True)
-
-    tau_tag = str(args.tau).replace(".", "")
-    n_centers_tag = len(center_idx)
-    tau_tag = str(args.tau).replace(".", "")
-    filename = f"H_n{n_data_points}_c{n_centers_tag}_rb{args.r_bins}_tau{tau_tag}.npz"
-    
-    np.savez(
-        os.path.join(save_dir, filename),
-        H=H.cpu().numpy(),
-        r=r.cpu().numpy(),
-        center_idx=center_idx.cpu().numpy(),
-        n_points=args.n_points,
-        n_centers=args.n_centers,
-        r_bins=args.r_bins,
-        tau=args.tau,
-    )
-
-    print(f"Saved checkpoint: {os.path.join(save_dir, filename)}")
-
-
 def resolve_n_centers(requested_n_centers, n_available):
     """
     Clip requested number of centers to available points.
@@ -230,192 +110,215 @@ def resolve_n_centers(requested_n_centers, n_available):
     return min(requested_n_centers, n_available)
 
 
-def symmetric_ring_center_idx(points_per_layer, n_layers, requested_n_centers):
+def load_s2_artifact(npz_path):
     """
-    Choose centers equally across rings.
-
-    Uses the largest number of centers that can be distributed equally
-    across all rings.
+    Load saved S2 points + geodesics artifact.
     """
-    max_centers = points_per_layer * n_layers
-    requested_n_centers = min(requested_n_centers, max_centers)
+    data = np.load(npz_path)
 
-    centers_per_layer = requested_n_centers // n_layers
-    used_centers = centers_per_layer * n_layers
-
-    idx = []
-    for layer in range(n_layers):
-        start = layer * points_per_layer
-        idx.extend(range(start, start + centers_per_layer))
-
-    return torch.as_tensor(idx, dtype=torch.long), centers_per_layer, used_centers
+    payload = {
+        "Z": torch.from_numpy(data["Z"]).float(),
+        "C_g": torch.from_numpy(data["C_g"]).float(),
+        "canonical_order": torch.from_numpy(data["canonical_order"]).long(),
+        "labels": torch.from_numpy(data["labels"]).long() if "labels" in data.files else None,
+        "center_idx": torch.from_numpy(data["center_idx"]).long() if "center_idx" in data.files else None,
+    }
+    return payload
 
 
-
-# ---- Main experiment functions ----
-
-def run_uniform_s2(args):
+def build_artifact_path(args):
     """
-    Uniform S^2 LDD computation.
+    Construct default artifact path from experiment metadata.
     """
-    Z = sample_uniform_S2(args.n_points)
-    C_g = compute_geodesics_S2(Z)
+    filename = f"points_and_geodesics_n{args.n_points}_seed{args.seed}.npz"
+    return os.path.join(args.artifact_root, args.experiment, filename)
+
+
+def build_ldd_output_paths(args, n_points, n_centers):
+    """
+    Build output paths for LDD artifact and metadata.
+    """
+    tau_tag = str(args.tau).replace(".", "")
+    filename = f"ldd_H_n{n_points}_c{n_centers}_rb{args.r_bins}_tau{tau_tag}.npz"
+
+    ldd_dir = os.path.join(args.artifact_root, args.experiment)
+    os.makedirs(ldd_dir, exist_ok=True)
+
+    ldd_path = os.path.join(ldd_dir, filename)
+    meta_path = ldd_path.replace(".npz", "_metadata.json")
+
+    return ldd_path, meta_path
+
+
+def build_plot_path(args, n_points, n_centers):
+    """
+    Build plot path.
+    """
+    os.makedirs(args.plot_root, exist_ok=True)
+
+    tau_tag = str(args.tau).replace(".", "")
+    filename = (
+        f"{args.experiment}_ldd_signatures_"
+        f"n{n_points}_c{n_centers}_rb{args.r_bins}_tau{tau_tag}.png"
+    )
+    return os.path.join(args.plot_root, filename)
+
+
+def save_summary_json(summary, tau, out_path, experiment):
+    """
+    Save LDD summary in JSON-friendly format.
+    """
+    json_summary = {
+        "experiment": experiment,
+        "tau": float(tau),
+
+        "pairwise_signature_distances": {
+            "min": float(summary["pair_min"]),
+            "max": float(summary["pair_max"]),
+            "mean": float(summary["pair_mean"]),
+            "std": float(summary["pair_std"]),
+            "q95": float(summary["pair_q95"]),
+            "frac_under_tau": float(summary["frac_under_tau"]),
+        },
+
+        "deviation_from_mean_signature": {
+            "min": float(summary["dev_min"]),
+            "max": float(summary["dev_max"]),
+            "mean": float(summary["dev_mean"]),
+            "std": float(summary["dev_std"]),
+        },
+    }
+
+    with open(out_path, "w") as f:
+        json.dump(json_summary, f, indent=2)
+
+def main(args):
+    if args.artifact_file is not None:
+        artifact_path = args.artifact_file
+    else:
+        artifact_path = build_artifact_path(args)
+
+    if not os.path.exists(artifact_path):
+        raise FileNotFoundError(f"Could not find artifact file: {artifact_path}")
+
+    payload = load_s2_artifact(artifact_path)
+
+    Z = payload["Z"]
+    C_g = payload["C_g"]
+    saved_center_idx = payload["center_idx"]
+
+    n_points = Z.shape[0]
+
+    # Center choice logic:
+    # 1) use saved center_idx if present and no override requested
+    # 2) otherwise use requested n_centers
+    if saved_center_idx is not None and not args.override_centers:
+        center_idx = saved_center_idx
+    else:
+        center_idx = None
+        if args.n_centers is not None:
+            n_centers = resolve_n_centers(args.n_centers, n_points)
+            center_idx = torch.arange(n_centers, dtype=torch.long)
 
     H, r, center_idx, z_points, C_centers = LDD(
-        Z, C_g,
-        r_bins=args.r_bins,
-        r_max=np.pi,
-        n_centers = resolve_n_centers(args.n_centers, Z.shape[0]),
-    )
-    
-    save_ldd_checkpoint("uniform_s2", H, r, center_idx, Z.shape[0], args)
-
-    summary = compute_summary(H, args.tau)
-    print_summary("uniform S2", summary, args.tau)
-
-    plot_ldd_signatures(
-        r, H, summary["H_mean"],
-        savepath=os.path.join(args.plot_dir, "uniform_s2_ldd.png"),
-        title="LDD signatures (uniform on S2)",
-        n_plot=args.n_plot,
-    )
-
-
-def run_symmetric_vmf(args):
-    """
-    Symmetric ring-based worst-case symmetry test.
-    """
-    mu = np.array([0.0, 0.0, 1.0])
-
-    Z, points_per_layer, used_points = sample_symmetric_ring_points(
-        mu=mu,
-        layer_thetas=args.layer_thetas,
-        n_points=args.n_points,
-    )
-    C_g = compute_geodesics_S2(Z)
-
-    center_idx, centers_per_layer, used_centers = symmetric_ring_center_idx(
-        points_per_layer=points_per_layer,
-        n_layers=len(args.layer_thetas),
-        requested_n_centers=args.n_centers,
-    )
-
-    H, r, center_idx, z_points, C_centers = LDD(
-        Z, C_g,
+        Z,
+        C_g,
         r_bins=args.r_bins,
         r_max=np.pi,
         center_idx=center_idx,
     )
 
-    save_ldd_checkpoint("symmetric_vmf", H, r, center_idx, Z.shape[0], args)
-
     summary = compute_summary(H, args.tau)
-    print_summary("symmetric vMF-like", summary, args.tau)
 
-    print("Requested points:", args.n_points)
-    print("Used points:", used_points)
-    print("Points per layer:", points_per_layer)
-    print("Requested centers:", args.n_centers)
-    print("Used centers:", used_centers)
-    print("Centers per layer:", centers_per_layer)
+    n_centers_used = len(center_idx)
+    ldd_out_path, meta_out_path = build_ldd_output_paths(args, n_points, n_centers_used)
 
+    summary_path = ldd_out_path.replace(".npz", "_summary.json")
+
+    save_summary_json(
+        summary,
+        args.tau,
+        summary_path,
+        args.experiment,
+    )
+
+    np.savez_compressed(
+        ldd_out_path,
+        H=H.cpu().numpy().astype(np.float32),
+        r=r.cpu().numpy().astype(np.float32),
+        center_idx=center_idx.cpu().numpy().astype(np.int64),
+        n_points=np.int64(n_points),
+        n_centers=np.int64(n_centers_used),
+        r_bins=np.int64(args.r_bins),
+        tau=np.float32(args.tau),
+        artifact_file=np.array(artifact_path),
+    )
+
+    ldd_metadata = {
+        "experiment": args.experiment,
+        "artifact_file": artifact_path,
+        "ldd_file": ldd_out_path,
+        "n_points": int(n_points),
+        "n_centers": int(n_centers_used),
+        "r_bins": int(args.r_bins),
+        "tau": float(args.tau),
+        "used_saved_center_idx": bool(saved_center_idx is not None and not args.override_centers),
+        "override_centers": bool(args.override_centers),
+        "npz_keys": ["H", "r", "center_idx", "n_points", "n_centers", "r_bins", "tau", "artifact_file"],
+    }
+
+    with open(meta_out_path, "w") as f:
+        json.dump(ldd_metadata, f, indent=2)
+
+    plot_path = build_plot_path(args, n_points, n_centers_used)
     plot_ldd_signatures(
-        r, H, summary["H_mean"],
-        savepath=os.path.join(args.plot_dir, "symmetric_vmf_ldd.png"),
-        title="LDD signatures (symmetric vMF-like)",
-        n_plot=args.n_plot,
+        r,
+        H,
+        summary["H_mean"],
+        savepath=plot_path,
+        title=f"LDD signatures ({args.experiment})",
     )
 
-
-def run_isotropic_vmf(args):
-    """
-    Isotropic vMF-like sampling around one mode.
-    """
-    mu = np.array([0.0, 0.0, 1.0])
-    Z = sample_vmf_approx(mu=mu, kappa=args.kappa, n=args.n_points)
-    C_g = compute_geodesics_S2(Z)
-
-    H, r, center_idx, z_points, C_centers = LDD(
-        Z, C_g,
-        r_bins=args.r_bins,
-        r_max=np.pi,
-        n_centers = resolve_n_centers(args.n_centers, Z.shape[0]),
-    )
-
-    save_ldd_checkpoint("isotropic_vmf", H, r, center_idx, Z.shape[0], args)
-
-    summary = compute_summary(H, args.tau)
-    print_summary("isotropic vMF-like", summary, args.tau)
-
-    plot_ldd_signatures(
-        r, H, summary["H_mean"],
-        savepath=os.path.join(args.plot_dir, "isotropic_vmf_ldd.png"),
-        title="LDD signatures (isotropic vMF-like)",
-        n_plot=args.n_plot,
-    )
-
-
-def run_vmf_mixture(args):
-    """
-    Mixture of approximate vMF-like components.
-    """
-    mus = [
-        np.array([0.0, 0.0, 1.0]),
-        np.array([1.0, 0.0, 0.0]),
-        np.array([0.0, 1.0, 0.0]),
-    ]
-    kappas = [args.kappa, args.kappa, args.kappa]
-    weights = [0.2, 0.7, 0.1]
-
-    Z = sample_vmf_mixture_approx(
-        mus=mus,
-        kappas=kappas,
-        weights=weights,
-        n=args.n_points,
-    )
-    C_g = compute_geodesics_S2(Z)
-
-    H, r, center_idx, z_points, C_centers = LDD(
-        Z, C_g,
-        r_bins=args.r_bins,
-        r_max=np.pi,
-        n_centers = resolve_n_centers(args.n_centers, Z.shape[0]),
-    )
-
-    save_ldd_checkpoint("vmf_mixture", H, r, center_idx, Z.shape[0], args)
-
-    summary = compute_summary(H, args.tau)
-    print_summary("vMF mixture", summary, args.tau)
-
-    plot_ldd_signatures(
-        r, H, summary["H_mean"],
-        savepath=os.path.join(args.plot_dir, "vmf_mixture_ldd.png"),
-        title="LDD signatures (vMF mixture)",
-        n_plot=args.n_plot,
-    )
+    print(f"Loaded artifact: {artifact_path}")
+    print(f"Saved LDD file to: {ldd_out_path}")
+    print(f"Saved LDD metadata to: {meta_out_path}")
+    print(f"Saved plot to: {plot_path}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--experiment", type=str, required=True,
-                        choices=["uniform_s2", "symmetric_vmf", "isotropic_vmf", "vmf_mixture"])
-    parser.add_argument("--plot_dir", type=str, default="plots/ldd")
-    parser.add_argument("--n_points", type=int, default=2000)
-    parser.add_argument("--n_centers", type=int, default=1000)
-    parser.add_argument("--r_bins", type=int, default=200)
+
+    parser.add_argument(
+        "--experiment",
+        type=str,
+        required=True,
+        choices=["uniform_s2", "symmetric_vmf", "isotropic_vmf", "vmf_mixture"],
+    )
+
+    parser.add_argument("--artifact-root", type=str, default="artifacts/s2")
+    parser.add_argument("--artifact-file", type=str, default=None)
+
+    parser.add_argument("--plot-root", type=str, default="plots/ldd")
+
+    parser.add_argument("--n-points", type=int, default=2000)
+    parser.add_argument("--seed", type=int, default=0)
+
+    parser.add_argument("--n-centers", type=int, default=None)
+    parser.add_argument("--override-centers", action="store_true")
+
+    parser.add_argument("--r-bins", type=int, default=200)
     parser.add_argument("--tau", type=float, default=0.015)
-    parser.add_argument("--n_plot", type=int, default=10)
-    parser.add_argument("--kappa", type=float, default=10.0)
-    parser.add_argument("--layer_thetas", type=float, nargs="+", default=[0.25, 0.50, 0.75])
 
     args = parser.parse_args()
-    os.makedirs(args.plot_dir, exist_ok=True)
+    main(args)
 
-    if args.experiment == "uniform_s2":
-        run_uniform_s2(args)
-    elif args.experiment == "symmetric_vmf":
-        run_symmetric_vmf(args)
-    elif args.experiment == "isotropic_vmf":
-        run_isotropic_vmf(args)
-    elif args.experiment == "vmf_mixture":
-        run_vmf_mixture(args)
+
+# Example:
+# python LDD_run.py \
+#   --experiment uniform_s2 \
+#   --artifact-root artifacts/s2 \
+#   --plot-root plots/ldd \
+#   --n-points 2000 \
+#   --seed 0 \
+#   --r-bins 200 \
+#   --tau 0.015

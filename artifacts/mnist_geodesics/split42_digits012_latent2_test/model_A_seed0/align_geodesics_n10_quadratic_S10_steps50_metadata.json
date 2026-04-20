@@ -1,0 +1,24 @@
+{
+  "experiment_name": "split42_digits012_latent2_test",
+  "model_name": "model_A",
+  "model_seed": 0,
+  "model_file": "best_model.pt",
+  "split_name": "align",
+  "latent_path": "artifacts/mnist/split42_digits012_latent2_test/model_A_seed0/align_latents.pt",
+  "model_path": "checkpoints/mnist/split42_digits012_latent2_test/model_A_seed0/best_model.pt",
+  "config_path": "checkpoints/mnist/split42_digits012_latent2_test/model_A_seed0/config.pt",
+  "selection_mode": "first",
+  "selection_seed": 0,
+  "geodesic_cfg": {
+    "curve_type": "quadratic",
+    "lr": 0.1,
+    "steps": 50,
+    "num_segments": 10,
+    "ensemble": false,
+    "print_every": 0
+  },
+  "num_points": 10,
+  "latent_dim": 2,
+  "distance_dtype": "float32",
+  "npz_file": "artifacts/mnist_geodesics/split42_digits012_latent2_test/model_A_seed0/align_geodesics_n10_quadratic_S10_steps50.npz"
+}

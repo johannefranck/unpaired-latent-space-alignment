@@ -1,0 +1,32 @@
+{
+  "experiment": "isotropic_vmf",
+  "distribution": "isotropic_vmf_like",
+  "mu": [
+    0.0,
+    0.0,
+    1.0
+  ],
+  "kappa": 10.0,
+  "n_points_requested": 2000,
+  "n_points_used": 2000,
+  "n_centers_requested": 1000,
+  "n_centers_used": 1000,
+  "seed": 0,
+  "artifact_file": "artifacts/s2/isotropic_vmf/points_and_geodesics_n2000_seed0.npz",
+  "z_shape": [
+    2000,
+    3
+  ],
+  "geodesic_shape": [
+    2000,
+    2000
+  ],
+  "num_points": 2000,
+  "has_canonical_order": true,
+  "npz_keys": [
+    "Z",
+    "C_g",
+    "canonical_order",
+    "center_idx"
+  ]
+}

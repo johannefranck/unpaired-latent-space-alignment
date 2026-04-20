@@ -1,0 +1,21 @@
+{
+  "experiment": "symmetric_vmf",
+  "artifact_file": "artifacts/s2/symmetric_vmf/points_and_geodesics_n1998_seed0.npz",
+  "ldd_file": "artifacts/s2/symmetric_vmf/ldd_H_n1998_c999_rb200_tau0015.npz",
+  "n_points": 1998,
+  "n_centers": 999,
+  "r_bins": 200,
+  "tau": 0.015,
+  "used_saved_center_idx": true,
+  "override_centers": false,
+  "npz_keys": [
+    "H",
+    "r",
+    "center_idx",
+    "n_points",
+    "n_centers",
+    "r_bins",
+    "tau",
+    "artifact_file"
+  ]
+}

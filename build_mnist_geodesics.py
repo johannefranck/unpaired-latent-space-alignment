@@ -1,6 +1,9 @@
 import os
+import json
 import argparse
+import numpy as np
 import torch
+import datetime
 
 from vae import VAE
 from geodesics import compute_geodesics
@@ -120,51 +123,49 @@ def main(args):
         f"{num_points_tag}_"
         f"{args.curve_type}_"
         f"S{args.num_segments}_"
-        f"steps{args.steps}.pt"
+        f"steps{args.steps}.npz"
     )
 
     out_path = os.path.join(geodesic_model_dir, filename)
 
-    payload = {
-        # experiment/model metadata
+    # save numeric arrays in compressed npz
+    np.savez_compressed(
+        out_path,
+        D_geodesic=D.cpu().numpy().astype(np.float32),
+        x=X.cpu().numpy().astype(np.float32),
+        y=y.cpu().numpy().astype(np.int64),
+        z_mu=Z.cpu().numpy().astype(np.float32),
+        chosen_idx_within_latent_file=chosen_idx.cpu().numpy().astype(np.int64),
+        dataset_indices_raw=dataset_indices_raw.cpu().numpy().astype(np.int64),
+        canonical_order=canonical_order.cpu().numpy().astype(np.int64),
+    )
+
+    # save non-array metadata separately
+    metadata = {
         "experiment_name": args.experiment_name,
+        "created_at": datetime.now().isoformat(),
         "model_name": args.model_name,
         "model_seed": args.model_seed,
         "model_file": args.model_file,
         "split_name": args.split_name,
-
-        # source files
         "latent_path": latent_path,
         "model_path": model_path,
         "config_path": config_path,
-
-        # geodesic config
-        "geodesic_cfg": cfg,
         "selection_mode": args.selection_mode,
         "selection_seed": args.selection_seed,
-
-        # chosen subset bookkeeping
-        "chosen_idx_within_latent_file": chosen_idx.cpu(),
-        "dataset_indices_raw": dataset_indices_raw.cpu(),
-        "canonical_order": canonical_order.cpu(),
-
-        # optional saved subset for later evaluation/plots
-        "x": X.cpu(),
-        "y": y.cpu(),
-        "z_mu": Z.cpu(),
-
-        # actual geodesic matrix
-        "D_geodesic": D.cpu(),
-
-        # convenience
-        "num_points": Z.shape[0],
-        "latent_dim": latent_dim,
-        "distance_dtype": str(D.dtype),
+        "geodesic_cfg": cfg,
+        "num_points": int(Z.shape[0]),
+        "latent_dim": int(latent_dim),
+        "distance_dtype": "float32",
+        "npz_file": out_path,
     }
 
-    torch.save(payload, out_path)
+    metadata_path = out_path.replace(".npz", "_metadata.json")
+    with open(metadata_path, "w") as f:
+        json.dump(metadata, f, indent=2)
 
     print(f"Saved geodesics to: {out_path}")
+    print(f"Saved metadata to: {metadata_path}")
     print(f"Distance matrix shape: {tuple(D.shape)}")
 
 

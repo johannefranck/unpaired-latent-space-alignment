@@ -1,0 +1,40 @@
+{
+  "experiment": "symmetric_vmf",
+  "distribution": "symmetric_ring_vmf_like",
+  "mu": [
+    0.0,
+    0.0,
+    1.0
+  ],
+  "layer_thetas": [
+    0.25,
+    0.5,
+    0.75
+  ],
+  "n_points_requested": 2000,
+  "n_points_used": 1998,
+  "points_per_layer": 666,
+  "n_centers_requested": 1000,
+  "n_centers_used": 999,
+  "centers_per_layer": 333,
+  "used_centers": 999,
+  "seed": 0,
+  "artifact_file": "artifacts/s2/symmetric_vmf/points_and_geodesics_n1998_seed0.npz",
+  "z_shape": [
+    1998,
+    3
+  ],
+  "geodesic_shape": [
+    1998,
+    1998
+  ],
+  "num_points": 1998,
+  "has_canonical_order": true,
+  "npz_keys": [
+    "Z",
+    "C_g",
+    "canonical_order",
+    "labels",
+    "center_idx"
+  ]
+}

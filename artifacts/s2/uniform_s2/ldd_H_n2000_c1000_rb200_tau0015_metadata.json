@@ -1,0 +1,21 @@
+{
+  "experiment": "uniform_s2",
+  "artifact_file": "artifacts/s2/uniform_s2/points_and_geodesics_n2000_seed0.npz",
+  "ldd_file": "artifacts/s2/uniform_s2/ldd_H_n2000_c1000_rb200_tau0015.npz",
+  "n_points": 2000,
+  "n_centers": 1000,
+  "r_bins": 200,
+  "tau": 0.015,
+  "used_saved_center_idx": true,
+  "override_centers": false,
+  "npz_keys": [
+    "H",
+    "r",
+    "center_idx",
+    "n_points",
+    "n_centers",
+    "r_bins",
+    "tau",
+    "artifact_file"
+  ]
+}
