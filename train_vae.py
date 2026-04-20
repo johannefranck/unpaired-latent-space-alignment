@@ -22,7 +22,9 @@ def set_seed(seed: int):
 
 def train_one_epoch(model, loader, optimizer, device):
     model.train()
-    total_loss = total_recon = total_kl = 0.0
+    total_loss = 0.0
+    total_recon = 0.0
+    total_kl = 0.0
     n_batches = 0
 
     for x, _ in loader:
@@ -48,7 +50,9 @@ def train_one_epoch(model, loader, optimizer, device):
 @torch.no_grad()
 def eval_one_epoch(model, loader, device):
     model.eval()
-    total_loss = total_recon = total_kl = 0.0
+    total_loss = 0.0
+    total_recon = 0.0
+    total_kl = 0.0
     n_batches = 0
 
     for x, _ in loader:
@@ -80,16 +84,18 @@ def save_history_plot(history, out_path):
     val_kl = [x["kl"] for x in history["val"]]
 
     plt.figure(figsize=(8, 5))
-    plt.plot(epochs, train_loss, label="train loss")
-    plt.plot(epochs, val_loss, label="val loss")
-    plt.plot(epochs, train_recon, label="train recon", linestyle="--")
-    plt.plot(epochs, val_recon, label="val recon", linestyle="--")
-    plt.plot(epochs, train_kl, label="train kl", linestyle=":")
-    plt.plot(epochs, val_kl, label="val kl", linestyle=":")
+
+    plt.plot(epochs, train_loss, color="tab:blue", linewidth=2, label="Train Loss")
+    plt.plot(epochs, val_loss, color="tab:blue", linewidth=2, linestyle="--", label="Val Loss")
+
+    plt.plot(epochs, train_recon, color="lightblue", linewidth=1.5, label="Train Recon")
+    plt.plot(epochs, val_recon, color="lightblue", linewidth=1.5, linestyle="--", label="Val Recon")
+
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.title("VAE training history")
     plt.legend()
+
     plt.tight_layout()
     plt.savefig(out_path, dpi=150)
     plt.close()
@@ -101,12 +107,25 @@ def save_json_history(history, out_path):
 
 
 def main(args):
-    device = torch.device("cuda" if args.device == "cuda" and torch.cuda.is_available() else "cpu")
+    device = torch.device(
+        "cuda" if args.device == "cuda" and torch.cuda.is_available() else "cpu"
+    )
     set_seed(args.model_seed)
 
     model_name = f"{args.model_name}_seed{args.model_seed}"
-    model_dir = os.path.join(args.out_dir, model_name)
-    os.makedirs(model_dir, exist_ok=True)
+
+    checkpoint_model_dir = os.path.join(
+        args.checkpoint_root,
+        args.experiment_name,
+        model_name,
+    )
+    plot_dir = os.path.join(
+        args.plot_root,
+        args.experiment_name,
+    )
+
+    os.makedirs(checkpoint_model_dir, exist_ok=True)
+    os.makedirs(plot_dir, exist_ok=True)
 
     split_payload = torch.load(args.split_file)
     split_raw = split_payload["split_indices_raw"]
@@ -144,9 +163,9 @@ def main(args):
 
     best_val = float("inf")
     best_epoch = -1
-    best_state = None
 
     config = {
+        "experiment_name": args.experiment_name,
         "model_name": args.model_name,
         "model_seed": args.model_seed,
         "latent_dim": args.latent_dim,
@@ -157,8 +176,9 @@ def main(args):
         "data_root": args.data_root,
         "num_workers": args.num_workers,
         "save_every": args.save_every,
+        "device_requested": args.device,
     }
-    torch.save(config, os.path.join(model_dir, "config.pt"))
+    torch.save(config, os.path.join(checkpoint_model_dir, "config.pt"))
 
     for epoch in range(1, args.epochs + 1):
         train_metrics = train_one_epoch(model, train_loader, optimizer, device)
@@ -169,20 +189,27 @@ def main(args):
 
         print(
             f"[Epoch {epoch:04d}] "
-            f"train loss={train_metrics['loss']:.4f} recon={train_metrics['recon']:.4f} kl={train_metrics['kl']:.4f} | "
-            f"val loss={val_metrics['loss']:.4f} recon={val_metrics['recon']:.4f} kl={val_metrics['kl']:.4f}"
+            f"train loss={train_metrics['loss']:.4f} "
+            f"recon={train_metrics['recon']:.4f} "
+            f"kl={train_metrics['kl']:.4f} | "
+            f"val loss={val_metrics['loss']:.4f} "
+            f"recon={val_metrics['recon']:.4f} "
+            f"kl={val_metrics['kl']:.4f}"
         )
 
-        torch.save(model.state_dict(), os.path.join(model_dir, "last_model.pt"))
-        torch.save(history, os.path.join(model_dir, "history.pt"))
-        save_json_history(history, os.path.join(model_dir, "history.json"))
-        save_history_plot(history, os.path.join(model_dir, "training_curve.png"))
-
+        torch.save(model.state_dict(), os.path.join(checkpoint_model_dir, "last_model.pt"))
+        torch.save(history, os.path.join(checkpoint_model_dir, "history.pt"))
+        save_json_history(history, os.path.join(checkpoint_model_dir, "history.json"))
+        plot_path = os.path.join(plot_dir, f"{model_name}_training_curve.png")
+        save_history_plot(history, plot_path)
         if val_metrics["loss"] < best_val:
             best_val = val_metrics["loss"]
             best_epoch = epoch
-            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
-            torch.save(best_state, os.path.join(model_dir, "best_model.pt"))
+            best_state = {
+                k: v.detach().cpu().clone()
+                for k, v in model.state_dict().items()
+            }
+            torch.save(best_state, os.path.join(checkpoint_model_dir, "best_model.pt"))
 
         if args.save_every > 0 and epoch % args.save_every == 0:
             ckpt = {
@@ -193,25 +220,37 @@ def main(args):
                 "best_val": best_val,
                 "best_epoch": best_epoch,
             }
-            torch.save(ckpt, os.path.join(model_dir, f"checkpoint_epoch_{epoch:04d}.pt"))
+            torch.save(
+                ckpt,
+                os.path.join(checkpoint_model_dir, f"checkpoint_epoch_{epoch:04d}.pt"),
+            )
 
     summary = {
         "best_val": best_val,
         "best_epoch": best_epoch,
         "n_train": len(ds_train),
         "n_val": len(ds_val),
+        "checkpoint_dir": checkpoint_model_dir,
+        "plot_dir": plot_dir,
     }
-    torch.save(summary, os.path.join(model_dir, "summary.pt"))
-    print(f"Saved model artifacts to: {model_dir}")
+    torch.save(summary, os.path.join(checkpoint_model_dir, "summary.pt"))
+
+    print(f"Saved model artifacts to: {checkpoint_model_dir}")
+    print(f"Saved plots to: {plot_dir}")
     print(f"Best val loss: {best_val:.4f} at epoch {best_epoch}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--data-root", type=str, default="data")
     parser.add_argument("--split-file", type=str, required=True)
-    parser.add_argument("--out-dir", type=str, default="checkpoints/mnist")
+
+    parser.add_argument("--experiment-name", type=str, required=True)
+    parser.add_argument("--checkpoint-root", type=str, default="checkpoints/mnist")
+    parser.add_argument("--plot-root", type=str, default="plots/mnist")
+
     parser.add_argument("--model-name", type=str, default="vaeA")
     parser.add_argument("--model-seed", type=int, default=0)
 
@@ -224,3 +263,18 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     main(args)
+
+
+# python train_vae.py \
+#   --device cuda \
+#   --data-root data \
+#   --split-file data/MNIST/splits/mnist_split_seed_42_digits_0_1_2.pt \
+#   --experiment-name split42_digits012_latent2_test \
+#   --checkpoint-root checkpoints/mnist \
+#   --plot-root plots/mnist \
+#   --model-name model_B \
+#   --model-seed 1 \
+#   --epochs 10 \
+#   --batch-size 128 \
+#   --latent-dim 2 \
+#   --lr 1e-3
