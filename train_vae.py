@@ -112,7 +112,7 @@ def main(args):
     )
     set_seed(args.model_seed)
 
-    model_name = f"{args.model_name}_seed{args.model_seed}"
+    model_name = f"{args.model_name}_ld{args.latent_dim}_seed{args.model_seed}"
 
     checkpoint_model_dir = os.path.join(
         args.checkpoint_root,
@@ -175,7 +175,6 @@ def main(args):
         "split_file": args.split_file,
         "data_root": args.data_root,
         "num_workers": args.num_workers,
-        "save_every": args.save_every,
         "device_requested": args.device,
     }
     torch.save(config, os.path.join(checkpoint_model_dir, "config.pt"))
@@ -211,20 +210,6 @@ def main(args):
             }
             torch.save(best_state, os.path.join(checkpoint_model_dir, "best_model.pt"))
 
-        if args.save_every > 0 and epoch % args.save_every == 0:
-            ckpt = {
-                "epoch": epoch,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "history": history,
-                "best_val": best_val,
-                "best_epoch": best_epoch,
-            }
-            torch.save(
-                ckpt,
-                os.path.join(checkpoint_model_dir, f"checkpoint_epoch_{epoch:04d}.pt"),
-            )
-
     summary = {
         "best_val": best_val,
         "best_epoch": best_epoch,
@@ -259,7 +244,6 @@ if __name__ == "__main__":
     parser.add_argument("--latent-dim", type=int, default=8)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--num-workers", type=int, default=0)
-    parser.add_argument("--save-every", type=int, default=50)
 
     args = parser.parse_args()
     main(args)

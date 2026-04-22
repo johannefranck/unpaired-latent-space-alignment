@@ -4,6 +4,8 @@
 
 
 *results/
+*logs/
+*scripts/
 
 
 # Byte-compiled / optimized / DLL files

@@ -35,11 +35,10 @@ def get_colors(n, cmap=None):
 
 def get_single_color(x, cmap=None):
     """
-    Sample single color from [0,1].
+    Sample single color from the color list 
     """
     if cmap is None:
-        cmap = get_cmap()
-    return cmap(x)
+        return colors[x]
 
 def color_segment(name = "blue_pink", colorlist = colors, N=256):
     return LinearSegmentedColormap.from_list(name, colorlist, N=256)

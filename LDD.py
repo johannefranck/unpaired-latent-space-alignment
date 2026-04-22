@@ -1,20 +1,4 @@
-import numpy as np
 import torch
-import torch.nn as nn
-import os
-import matplotlib.pyplot as plt
-
-from colors import get_colors, get_single_color
-from geodesics import compute_geodesics_S2, compute_geodesics
-
-
-def sample_uniform_S2(n):
-    """
-    Sample n points uniformly on S^2.
-    """
-    x = torch.randn(n, 3)
-    return x / x.norm(dim=1, keepdim=True)
-
 
 
 def LDD(Z, C_g, r_bins, r_max, n_centers=None, center_idx=None):

@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 
-from colors import get_colors
+from colors import get_colors, get_single_color
 from LDD import LDD, signature_distance_matrix
 
 
@@ -72,7 +72,7 @@ def plot_ldd_signatures(r, H, H_mean, savepath, title):
     Plot all LDD signatures with the mean signature.
     """
     plt.figure(figsize=(6, 4))
-    line_colors = get_colors(H.shape[0])
+    curve_color = get_single_color(6)
 
     for i in range(H.shape[0]):
         plt.plot(
@@ -80,7 +80,7 @@ def plot_ldd_signatures(r, H, H_mean, savepath, title):
             H[i].numpy(),
             alpha=0.25,
             linewidth=1.8,
-            color=line_colors[i],
+            color=curve_color,
         )
 
     plt.plot(
@@ -298,7 +298,7 @@ if __name__ == "__main__":
     parser.add_argument("--artifact-root", type=str, default="artifacts/s2")
     parser.add_argument("--artifact-file", type=str, default=None)
 
-    parser.add_argument("--plot-root", type=str, default="plots/ldd")
+    parser.add_argument("--plot-root", type=str, default="plots/s2/ldd")
 
     parser.add_argument("--n-points", type=int, default=2000)
     parser.add_argument("--seed", type=int, default=0)
@@ -317,7 +317,7 @@ if __name__ == "__main__":
 # python LDD_run.py \
 #   --experiment uniform_s2 \
 #   --artifact-root artifacts/s2 \
-#   --plot-root plots/ldd \
+#   --plot-root plots/s2/ldd \
 #   --n-points 2000 \
 #   --seed 0 \
 #   --r-bins 200 \
