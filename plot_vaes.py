@@ -96,7 +96,7 @@ def project_to_2d(zA_full, zB_full, latent_dim):
 
     zA = Z_2d[:len(zA_full)]
     zB = Z_2d[len(zA_full):]
-    return zA, zB, "PC 1", "PC 2"
+    return zA, zB, "z1", "z2"
 
 
 def make_shared_legend(scatter_artist, labels):
@@ -189,7 +189,7 @@ def plot_vae_latent_alignment(
         s=5,
         alpha=0.7,
     )
-    axes[1].set_title(f"{full_B_name} ({split_name})")
+    axes[1].set_title(f"{full_B_name} ({split_name} set)")
 
     x_min = min(zA[:, 0].min(), zB[:, 0].min())
     x_max = max(zA[:, 0].max(), zB[:, 0].max())

@@ -38,7 +38,7 @@ def main(args):
         "cuda" if args.device == "cuda" and torch.cuda.is_available() else "cpu"
     )
 
-    model_name = f"{args.model_name}_seed{args.model_seed}"
+    model_name = f"{args.model_name}_ld{args.latent_dim}_seed{args.model_seed}"
 
     checkpoint_model_dir = os.path.join(
         args.checkpoint_root,
@@ -65,6 +65,12 @@ def main(args):
     config = torch.load(config_path, map_location="cpu")
     latent_dim = config["latent_dim"]
 
+    if latent_dim != args.latent_dim:
+        raise ValueError(
+            f"latent_dim mismatch: args.latent_dim={args.latent_dim}, "
+            f"but model config has latent_dim={latent_dim}"
+        )
+
     split_payload = torch.load(args.split_file, map_location="cpu")
     split_raw = split_payload["split_indices_raw"]
 
@@ -88,7 +94,7 @@ def main(args):
     loader = DataLoader(
         subset,
         batch_size=args.batch_size,
-        shuffle=False,   # canonical order
+        shuffle=False,
         num_workers=args.num_workers,
         pin_memory=(device.type == "cuda"),
     )
@@ -104,39 +110,31 @@ def main(args):
     canonical_order = torch.arange(n, dtype=torch.long)
 
     payload = {
-        # experiment/model metadata
         "experiment_name": args.experiment_name,
         "model_name": args.model_name,
         "model_seed": args.model_seed,
         "model_file": args.model_file,
         "latent_dim": latent_dim,
 
-        # path metadata
         "checkpoint_model_dir": checkpoint_model_dir,
         "model_path": model_path,
         "config_path": config_path,
         "split_file": args.split_file,
         "data_root": args.data_root,
 
-        # split metadata
         "split_name": args.split_name,
         "dataset_name": split_payload.get("dataset_name", "MNIST"),
         "selected_digits": split_payload.get("selected_digits", None),
         "digit_to_label": split_payload.get("digit_to_label", None),
 
-        # indexing metadata
-        # raw indices into the original MNIST training set
         "dataset_indices_raw": split_indices_raw,
-        # canonical order 
         "canonical_order": canonical_order,
 
-        # encoded artifacts
-        "x": encoded["x"],                 
+        "x": encoded["x"],
         "y": encoded["y"],
         "z_mu": encoded["z_mu"],
         "z_logvar": encoded["z_logvar"],
 
-        # convenience metadata
         "num_points": n,
         "x_shape": tuple(encoded["x"].shape),
         "z_shape": tuple(encoded["z_mu"].shape),
@@ -171,6 +169,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--model-name", type=str, required=True)
     parser.add_argument("--model-seed", type=int, required=True)
+    parser.add_argument("--latent-dim", type=int, required=True)
 
     parser.add_argument(
         "--split-name",
@@ -188,12 +187,14 @@ if __name__ == "__main__":
     main(args)
 
 
-
 # python encode_split.py \
 #   --device cuda \
 #   --data-root data \
 #   --split-file data/MNIST/splits/mnist_split_seed_42_digits_0_1_2.pt \
-#   --experiment-name split42_digits012_latent2_test \
-#   --model-name model_B \
-#   --model-seed 1 \
-#   --split-name align
+#   --experiment-name split42_digits012 \
+#   --checkpoint-root checkpoints/mnist \
+#   --artifact-root artifacts/mnist \
+#   --model-name model_A \
+#   --model-seed 0 \
+#   --latent-dim 8 \
+#   --split-name test

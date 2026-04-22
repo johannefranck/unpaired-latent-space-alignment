@@ -29,7 +29,7 @@ def main(args):
         "cuda" if args.device == "cuda" and torch.cuda.is_available() else "cpu"
     )
 
-    model_name = f"{args.model_name}_seed{args.model_seed}"
+    model_name = f"{args.model_name}_ld{args.latent_dim}_seed{args.model_seed}"
 
     checkpoint_model_dir = os.path.join(
         args.checkpoint_root,
@@ -57,7 +57,7 @@ def main(args):
     )
     model_path = os.path.join(
         checkpoint_model_dir,
-        args.model_file,
+        "best_model.pt",
     )
     config_path = os.path.join(
         checkpoint_model_dir,
@@ -76,12 +76,23 @@ def main(args):
 
     latent_dim = model_config["latent_dim"]
 
+    if latent_dim != args.latent_dim:
+        raise ValueError(
+            f"latent_dim mismatch: args.latent_dim={args.latent_dim}, "
+            f"but model config has latent_dim={latent_dim}"
+        )
+
     model = VAE(latent_dim=latent_dim).to(device)
     state_dict = torch.load(model_path, map_location=device)
     model.load_state_dict(state_dict, strict=True)
     model.eval()
 
     Z_all = latent_payload["z_mu"].float()
+    if Z_all.shape[1] != latent_dim:
+        raise ValueError(
+            f"Latent shape mismatch: encoded latents have dim {Z_all.shape[1]}, "
+            f"but model config has latent_dim={latent_dim}"
+        )
     X_all = latent_payload["x"].float()
     y_all = latent_payload["y"].long()
     dataset_indices_raw_all = latent_payload["dataset_indices_raw"].long()
@@ -121,9 +132,17 @@ def main(args):
     filename = (
         f"{args.split_name}_geodesics_"
         f"{num_points_tag}_"
-        f"{args.curve_type}_"
-        f"S{args.num_segments}_"
-        f"steps{args.steps}.npz"
+        f"{args.selection_mode}"
+    )
+
+    if args.selection_mode == "random":
+        filename += f"_selseed{args.selection_seed}"
+
+    filename += (
+        f"_{args.curve_type}"
+        f"_lr{str(args.lr).replace('.', '')}"
+        f"_S{args.num_segments}"
+        f"_steps{args.steps}.npz"
     )
 
     out_path = os.path.join(geodesic_model_dir, filename)
@@ -143,10 +162,10 @@ def main(args):
     # save non-array metadata separately
     metadata = {
         "experiment_name": args.experiment_name,
-        "created_at": datetime.now().isoformat(),
+        "created_at": datetime.datetime.now().isoformat(),
         "model_name": args.model_name,
         "model_seed": args.model_seed,
-        "model_file": args.model_file,
+        "model_file": "best_model.pt",
         "split_name": args.split_name,
         "latent_path": latent_path,
         "model_path": model_path,
@@ -178,12 +197,11 @@ if __name__ == "__main__":
     parser.add_argument("--model-name", type=str, required=True)
     parser.add_argument("--model-seed", type=int, required=True)
     parser.add_argument("--split-name", type=str, required=True, choices=["train", "val", "align", "test"])
+    parser.add_argument("--latent-dim", type=int, required=True)
 
     parser.add_argument("--checkpoint-root", type=str, default="checkpoints/mnist")
     parser.add_argument("--artifact-root", type=str, default="artifacts/mnist")
     parser.add_argument("--geodesic-root", type=str, default="artifacts/mnist_geodesics")
-
-    parser.add_argument("--model-file", type=str, default="best_model.pt")
 
     parser.add_argument("--num-points", type=int, default=None)
     parser.add_argument("--selection-mode", type=str, default="first", choices=["first", "random"])
@@ -201,12 +219,14 @@ if __name__ == "__main__":
 
 # python build_mnist_geodesics.py \
 #   --device cuda \
-#   --experiment-name split42_digits012_latent2_test \
-#   --model-name model_A \
-#   --model-seed 0 \
+#   --experiment-name split42_digits012 \
+#   --model-name model_B \
+#   --model-seed 12 \
+#   --latent-dim 8 \
 #   --split-name align \
-#   --num-points 50 \
-#   --selection-mode first \
+#   --num-points 20 \
+#   --selection-mode random \
+#   --selection-seed 0 \
 #   --curve-type quadratic \
-#   --steps 300 \
-#   --num-segments 20
+#   --steps 100 \
+#   --num-segments 15
