@@ -63,6 +63,48 @@ def signature_distance_matrix(H):
     return D
 
 
+def ldd_variation_diagnostics(H, eps=1e-12):
+    """
+    Measure variation and effective rank of LDD signatures.
+    """
+    H = torch.as_tensor(H, dtype=torch.float32)
+
+    n, B = H.shape
+    H_mean = H.mean(dim=0, keepdim=True)
+    Hc = H - H_mean
+
+    # Magnitude of LDD variation
+    ldd_global_std = torch.sqrt((Hc ** 2).mean()).item()
+
+    # Covariance over radius bins
+    Cov = (Hc.T @ Hc) / max(n - 1, 1)
+
+    eigvals = torch.linalg.eigvalsh(Cov)
+    eigvals = torch.clamp(eigvals, min=0.0)
+
+    total_var = eigvals.sum().item()
+
+    if total_var > eps:
+        p = eigvals / eigvals.sum()
+        effective_rank = torch.exp(-(p * torch.log(p + eps)).sum()).item()
+        top_eig_frac = (eigvals[-1] / eigvals.sum()).item()
+    else:
+        effective_rank = 0.0
+        top_eig_frac = 0.0
+
+    rank_cap = max(1, min(n - 1, B))
+
+    return {
+        "n_ldds": int(n),
+        "r_bins": int(B),
+        "rank_cap": int(rank_cap),
+        "ldd_global_std": float(ldd_global_std),
+        "total_variance": float(total_var),
+        "effective_rank": float(effective_rank),
+        "effective_rank_pct": float(effective_rank / rank_cap),
+        "top_eig_frac": float(top_eig_frac),
+    }
+
 
 
 def compute_summary(H, tau):
@@ -88,6 +130,8 @@ def compute_summary(H, tau):
     dev_mean = dev.mean().item()
     dev_std = dev.std().item()
 
+    variation = ldd_variation_diagnostics(H)
+
     return {
         "pair_min": pair_min,
         "pair_max": pair_max,
@@ -100,6 +144,7 @@ def compute_summary(H, tau):
         "dev_mean": dev_mean,
         "dev_std": dev_std,
         "H_mean": H_mean,
+        "ldd_variation": variation,
     }
 
 
@@ -122,6 +167,15 @@ def print_summary(name, summary, tau):
     print(f"mean  = {summary['dev_mean']:.6f}")
     print(f"std   = {summary['dev_std']:.6f}")
 
+    print("\nLDD variation")
+    print(f"n_ldds              = {summary['ldd_variation']['n_ldds']}")
+    print(f"r_bins              = {summary['ldd_variation']['r_bins']}")
+    print(f"rank cap            = {summary['ldd_variation']['rank_cap']}")
+    print(f"global std          = {summary['ldd_variation']['ldd_global_std']:.6f}")
+    print(f"total variance      = {summary['ldd_variation']['total_variance']:.6f}")
+    print(f"effective rank      = {summary['ldd_variation']['effective_rank']:.6f}")
+    print(f"effective rank pct  = {summary['ldd_variation']['effective_rank_pct']:.6f}")
+    print(f"top eig frac        = {summary['ldd_variation']['top_eig_frac']:.6f}")
 
 def plot_ldd_signatures(r, H, H_mean, savepath, title):
     """
@@ -243,6 +297,17 @@ def save_summary_json(summary, tau, out_path, experiment):
             "mean": float(summary["dev_mean"]),
             "std": float(summary["dev_std"]),
         },
+
+        "ldd_variation": {
+            "n_ldds": int(summary["ldd_variation"]["n_ldds"]),
+            "r_bins": int(summary["ldd_variation"]["r_bins"]),
+            "rank_cap": int(summary["ldd_variation"]["rank_cap"]),
+            "ldd_global_std": float(summary["ldd_variation"]["ldd_global_std"]),
+            "total_variance": float(summary["ldd_variation"]["total_variance"]),
+            "effective_rank": float(summary["ldd_variation"]["effective_rank"]),
+            "effective_rank_pct": float(summary["ldd_variation"]["effective_rank_pct"]),
+            "top_eig_frac": float(summary["ldd_variation"]["top_eig_frac"]),
+        },
     }
 
     with open(out_path, "w") as f:
@@ -285,6 +350,8 @@ def main(args):
     )
 
     summary = compute_summary(H, args.tau)
+
+    print_summary(args.experiment, summary, args.tau)
 
     n_centers_used = len(center_idx)
     ldd_out_path, meta_out_path = build_ldd_output_paths(args, n_points, n_centers_used)

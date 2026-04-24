@@ -6,7 +6,7 @@ import torch
 import matplotlib.pyplot as plt
 import ot
 
-from LDD_run import LDD, compute_summary, plot_ldd_signatures
+from LDD_run import LDD, compute_summary, plot_ldd_signatures, print_summary
 from colors import *
 
 # --------------------------------------------------
@@ -205,6 +205,16 @@ def save_summary_json(summary, tau, out_path, experiment_name):
             "max": float(summary["dev_max"]),
             "mean": float(summary["dev_mean"]),
             "std": float(summary["dev_std"]),
+        },
+        "ldd_variation": {
+            "n_ldds": int(summary["ldd_variation"]["n_ldds"]),
+            "r_bins": int(summary["ldd_variation"]["r_bins"]),
+            "rank_cap": int(summary["ldd_variation"]["rank_cap"]),
+            "ldd_global_std": float(summary["ldd_variation"]["ldd_global_std"]),
+            "total_variance": float(summary["ldd_variation"]["total_variance"]),
+            "effective_rank": float(summary["ldd_variation"]["effective_rank"]),
+            "effective_rank_pct": float(summary["ldd_variation"]["effective_rank_pct"]),
+            "top_eig_frac": float(summary["ldd_variation"]["top_eig_frac"]),
         },
     }
 
@@ -425,6 +435,52 @@ def plot_P_matrix_sorted(P, source_geom, target_geom, save_path, title, log_scal
     plt.savefig(save_path, dpi=150)
     plt.close()
 
+def ldd_covariance_spectrum(H, eps=1e-12):
+    """
+    Compute normalized covariance eigenvalue spectrum of LDD signatures.
+    """
+    H = torch.as_tensor(H, dtype=torch.float32)
+    Hc = H - H.mean(dim=0, keepdim=True)
+
+    Cov = (Hc.T @ Hc) / max(H.shape[0] - 1, 1)
+
+    eigvals = torch.linalg.eigvalsh(Cov)
+    eigvals = torch.clamp(eigvals, min=0.0)
+    eigvals = torch.flip(eigvals, dims=[0])
+
+    if eigvals.sum() > eps:
+        explained = eigvals / eigvals.sum()
+    else:
+        explained = eigvals
+
+    return explained
+
+
+def plot_ldd_spectrum(H, save_path, title):
+    """
+    Plot explained variance of LDD covariance eigenvalues.
+    """
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    explained = ldd_covariance_spectrum(H)
+
+    plt.figure(figsize=(5, 4))
+    plt.plot(
+        np.arange(1, len(explained) + 1),
+        explained.numpy(),
+        marker="o",
+        markersize=3,
+        linewidth=1.5,
+        color=get_single_color(6),
+    )
+
+    plt.xlabel("Component")
+    plt.ylabel("Explained variance")
+    plt.title(title)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150)
+    plt.close()
+
 # --------------------------------------------------
 # main
 # --------------------------------------------------
@@ -470,6 +526,13 @@ def main(args):
         args.tau,
     )
 
+    src_spectrum_path = src_plot_path.replace(".png", "_spectrum.png")
+    plot_ldd_spectrum(
+        source_ldd["H"],
+        save_path=src_spectrum_path,
+        title="LDD spectrum (source)",
+    )
+
     save_ldd_payload(src_ldd_path, source_geom, source_ldd)
     save_metadata(
         src_meta_path,
@@ -504,6 +567,14 @@ def main(args):
         args.r_bins,
         args.tau,
     )
+
+    tgt_spectrum_path = tgt_plot_path.replace(".png", "_spectrum.png")
+    plot_ldd_spectrum(
+        target_ldd["H"],
+        save_path=tgt_spectrum_path,
+        title="LDD spectrum (target)",
+    )
+
     save_ldd_payload(tgt_ldd_path, target_geom, target_ldd)
     save_metadata(
         tgt_meta_path,
@@ -610,6 +681,8 @@ def main(args):
     print(f"Loaded target geodesics: {args.target_geom_file}")
     print(f"Saved source LDD to: {src_ldd_path}")
     print(f"Saved target LDD to: {tgt_ldd_path}")
+    print(f"Saved source LDD spectrum plot to: {src_spectrum_path}")
+    print(f"Saved target LDD spectrum plot to: {tgt_spectrum_path}")
     print(f"Saved coupling arrays to: {map_npz_path}")
     print(f"Saved coupling metadata to: {map_meta_path}")
     print(f"Saved coupling plot to: {map_plot_path}")
