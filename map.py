@@ -6,6 +6,9 @@ import torch
 import matplotlib.pyplot as plt
 import ot
 
+from sklearn.decomposition import PCA
+
+from utils_GW import ZukoFlowMap
 from LDD_run import LDD, compute_summary, plot_ldd_signatures, print_summary
 from colors import *
 
@@ -98,7 +101,17 @@ def make_ldd_paths(artifact_root, plot_root, experiment_name, model_folder, role
     return npz_path, meta_path, summary_path, plot_path
 
 
-def make_map_paths(artifact_root, plot_root, experiment_name, model_folder, source_geom_path, target_geom_path, epsilon):
+def make_map_paths(
+    artifact_root,
+    plot_root,
+    experiment_name,
+    model_folder,
+    source_geom_path,
+    target_geom_path,
+    epsilon,
+    max_iter,
+    threshold,
+):
     artifact_dir = os.path.join(artifact_root, experiment_name, model_folder)
     plot_dir = os.path.join(plot_root, experiment_name, model_folder)
 
@@ -106,7 +119,11 @@ def make_map_paths(artifact_root, plot_root, experiment_name, model_folder, sour
     os.makedirs(plot_dir, exist_ok=True)
 
     eps_tag = str(epsilon).replace(".", "")
-    name = f"P_coupling_{stem(source_geom_path)}__to__{stem(target_geom_path)}_eps{eps_tag}"
+    thr_tag = f"{threshold:.0e}".replace("-", "m").replace("+", "")
+    name = (
+        f"P_coupling_{stem(source_geom_path)}__to__{stem(target_geom_path)}"
+        f"_eps{eps_tag}_gwiter{max_iter}_tol{thr_tag}"
+    )
 
     npz_path = os.path.join(artifact_dir, f"{name}.npz")
     meta_path = os.path.join(artifact_dir, f"{name}_metadata.json")
@@ -255,7 +272,7 @@ def normalize_distance_matrix(C):
         C = C / max_val
     return C
 
-def init_sinkhorn(M, epsilon):
+def init_sinkhorn(M, init_epsilon=0.02, num_itermax=5000):
     n_a, n_b = M.shape
     a, b = uniform_marginals(n_a, n_b)
 
@@ -263,7 +280,8 @@ def init_sinkhorn(M, epsilon):
         a,
         b,
         M.detach().cpu().numpy(),
-        reg=epsilon,
+        reg=init_epsilon,
+        numItermax=num_itermax,
     )
 
     return torch.from_numpy(pi0).float()
@@ -284,9 +302,93 @@ def solve_gw_coupling(C_a, C_b, epsilon, threshold, max_iter, pi0=None):
         G0=None if pi0 is None else pi0.detach().cpu().numpy(),
         max_iter=max_iter,
         tol=threshold,
+        #solver="PPA"
     )
 
     return torch.from_numpy(P).float()
+
+
+def coupling_euclidean_loss_target_to_source(Z_source, Z_target_mapped, P):
+    """
+    Algorithm 1 local Euclidean loss for map target -> source.
+
+    Z_source:        (n_source, d), A-space
+    Z_target_mapped: (n_target, d), mapped B -> A
+    P:               (n_source, n_target)
+
+    Loss:
+        sum_ij P_ij || T(z_target_j) - z_source_i ||^2
+    """
+    diff = Z_source[:, None, :] - Z_target_mapped[None, :, :]
+    sqdist = (diff ** 2).sum(dim=2)
+    return (P * sqdist).sum()
+
+def train_flow_target_to_source(
+    Z_source,
+    Z_target,
+    P,
+    transforms=4,
+    hidden_features=(64, 64),
+    bins=8,
+    lr=1e-3,
+    weight_decay=1e-5,
+    epochs=2000,
+    device="cpu",
+    verbose=False,
+):
+    """
+    Train flow T: target -> source.
+
+    In MNIST case:
+        source = A
+        target = B
+        T      = B -> A
+    """
+    Z_source_t = torch.tensor(Z_source, dtype=torch.float32, device=device)
+    Z_target_t = torch.tensor(Z_target, dtype=torch.float32, device=device)
+    P_t = torch.tensor(P, dtype=torch.float32, device=device)
+
+    model = ZukoFlowMap(
+        latent_dim=Z_target_t.shape[1],
+        transforms=transforms,
+        hidden_features=hidden_features,
+        bins=bins,
+    ).to(device)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+    best_loss = float("inf")
+    best_state = None
+
+    model.train()
+    for epoch in range(epochs):
+        optimizer.zero_grad()
+
+        Z_target_mapped = model(Z_target_t)  # B -> A
+
+        loss = coupling_euclidean_loss_target_to_source(
+            Z_source=Z_source_t,
+            Z_target_mapped=Z_target_mapped,
+            P=P_t,
+        )
+
+        loss.backward()
+        optimizer.step()
+
+        if loss.item() < best_loss:
+            best_loss = loss.item()
+            best_state = {
+                k: v.detach().cpu().clone()
+                for k, v in model.state_dict().items()
+            }
+
+        if verbose and (epoch % 200 == 0):
+            print(f"[flow target->source] epoch={epoch} loss={loss.item():.6f} best={best_loss:.6f}")
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
+
+    return model
 
 
 def compute_map_neural_GM(
@@ -325,7 +427,7 @@ def compute_map_neural_GM(
 
     # phase 1
     M = compute_M_distance(H_a, H_b)
-    pi0 = init_sinkhorn(M, epsilon)
+    pi0 = init_sinkhorn(M, init_epsilon=0.02, num_itermax=5000)
 
     # normalize geometry before GW
     C_a_gw = normalize_distance_matrix(C_a)
@@ -337,10 +439,27 @@ def compute_map_neural_GM(
     if not torch.isfinite(P).all() or P.sum().item() == 0.0:
         raise ValueError("GW coupling collapsed: P is non-finite or all zero.")
 
+    # phase 3-4:
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    flow_model = train_flow_target_to_source(
+        Z_source=Z_a.cpu().numpy(),   # A, decoder/reference space
+        Z_target=Z_b.cpu().numpy(),   # B, points to map
+        P=P.cpu().numpy(),            # rows=A, cols=B
+        transforms=4,
+        hidden_features=(64, 64),
+        bins=8,
+        lr=lr,
+        epochs=2000,
+        device=device,
+        verbose=True,
+    )
+
     return {
         "M": M,
         "pi0": pi0,
         "P": P,
+        "flow_target_to_source": flow_model,
     }
 
 
@@ -481,6 +600,140 @@ def plot_ldd_spectrum(H, save_path, title):
     plt.savefig(save_path, dpi=150)
     plt.close()
 
+
+def plot_source_and_mapped_2d(
+    Z_source,
+    Z_target,
+    flow_model,
+    source_geom,
+    target_geom,
+    save_path,
+    device="cpu",
+):
+    if "y" not in source_geom or "y" not in target_geom:
+        raise ValueError("Need y labels in both source_geom and target_geom for class-colored plot.")
+
+    flow_model = flow_model.to(device)
+    flow_model.eval()
+
+    with torch.no_grad():
+        Z_target_mapped = flow_model(Z_target.to(device)).cpu()
+
+    A = Z_source.cpu().numpy()
+    B = Z_target_mapped.cpu().numpy()
+
+    y_source = source_geom["y"].cpu().numpy()
+    y_target = target_geom["y"].cpu().numpy()
+
+    classes = np.unique(np.concatenate([y_source, y_target]))
+
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    plt.figure(figsize=(5, 5))
+
+    for c in classes:
+        col = get_single_color(int(c + 4))
+
+        idx_a = y_source == c
+        idx_b = y_target == c
+
+        plt.scatter(
+            A[idx_a, 0],
+            A[idx_a, 1],
+            s=24,
+            alpha=0.75,
+            color=col,
+            marker="o",
+            label=f"A class {c}",
+        )
+
+        plt.scatter(
+            B[idx_b, 0],
+            B[idx_b, 1],
+            s=32,
+            alpha=0.95,
+            color=col,
+            marker="x",
+            label=f"T(B) class {c}",
+        )
+
+    plt.xlabel("z1")
+    plt.ylabel("z2")
+    plt.title("A latent space: source vs mapped target")
+    plt.legend(fontsize=7, ncol=2)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=200)
+    plt.close()
+
+
+
+
+# --------------------------------------------------
+# evaluating
+# --------------------------------------------------
+
+def evaluate_target_to_source_map(Z_source, Z_target, P, flow_model, device="cpu", eps=1e-12):
+    """
+    Evaluate learned map T: target -> source.
+
+    source = A
+    target = B
+    P rows = source, cols = target
+    """
+    Z_source = Z_source.to(device)
+    Z_target = Z_target.to(device)
+    P = P.to(device)
+
+    flow_model = flow_model.to(device)
+    flow_model.eval()
+
+    with torch.no_grad():
+        Z_target_mapped = flow_model(Z_target)
+
+        loss_identity_like = coupling_euclidean_loss_target_to_source(
+            Z_source=Z_source,
+            Z_target_mapped=Z_target,
+            P=P,
+        )
+
+        loss_flow = coupling_euclidean_loss_target_to_source(
+            Z_source=Z_source,
+            Z_target_mapped=Z_target_mapped,
+            P=P,
+        )
+
+        col_mass = P.sum(dim=0, keepdim=True).T
+        Z_bary = (P.T @ Z_source) / (col_mass + eps)
+
+        loss_bary = coupling_euclidean_loss_target_to_source(
+            Z_source=Z_source,
+            Z_target_mapped=Z_bary,
+            P=P,
+        )
+
+        print("\n=== target -> source map evaluation ===")
+        print("Z_source:", tuple(Z_source.shape))
+        print("Z_target:", tuple(Z_target.shape))
+        print("Z_target_mapped:", tuple(Z_target_mapped.shape))
+
+        print("identity-like loss:", loss_identity_like.item())
+        print("flow loss:", loss_flow.item())
+        print("barycentric lower-bound loss:", loss_bary.item())
+        print("flow / identity-like:", (loss_flow / loss_identity_like).item())
+        print("flow / barycentric:", (loss_flow / loss_bary).item())
+
+        print("source std mean:", Z_source.std(dim=0).mean().item())
+        print("target std mean:", Z_target.std(dim=0).mean().item())
+        print("mapped std mean:", Z_target_mapped.std(dim=0).mean().item())
+        print("bary std mean:", Z_bary.std(dim=0).mean().item())
+
+        print("source pairwise mean:", torch.cdist(Z_source, Z_source).mean().item())
+        print("target pairwise mean:", torch.cdist(Z_target, Z_target).mean().item())
+        print("mapped pairwise mean:", torch.cdist(Z_target_mapped, Z_target_mapped).mean().item())
+        print("bary pairwise mean:", torch.cdist(Z_bary, Z_bary).mean().item())
+
+
+
 # --------------------------------------------------
 # main
 # --------------------------------------------------
@@ -513,6 +766,8 @@ def main(args):
         r_max=args.r_max,
         n_centers=args.n_centers,
     )
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # save source LDD
     src_ldd_path, src_meta_path, src_summary_path, src_plot_path = make_ldd_paths(
@@ -619,6 +874,31 @@ def main(args):
         is_s2=args.is_s2,
     )
 
+    # print summary 
+    evaluate_target_to_source_map(
+    Z_source=Z_a,
+    Z_target=Z_b,
+    P=result["P"],
+    flow_model=result["flow_target_to_source"],
+    device=device,
+    )
+
+    # evaluating plot 2d
+    plot_source_and_mapped_2d(
+        Z_source=Z_a,
+        Z_target=Z_b,
+        flow_model=result["flow_target_to_source"],
+        source_geom=source_geom,
+        target_geom=target_geom,
+        save_path=os.path.join(
+            args.plot_root,
+            args.experiment_name,
+            model_folder,
+            f"mapped_target_to_source_2d_eps{str(args.epsilon).replace('.', '')}.png",
+        ),
+        device=device,
+    )
+
     print("M min/max/std:", result["M"].min().item(), result["M"].max().item(), result["M"].std().item())
     print("pi0 min/max/std:", result["pi0"].min().item(), result["pi0"].max().item(), result["pi0"].std().item())
     print("P min/max/std:", result["P"].min().item(), result["P"].max().item(), result["P"].std().item())
@@ -634,6 +914,8 @@ def main(args):
         args.source_geom_file,
         args.target_geom_file,
         args.epsilon,
+        args.max_iter,
+        args.threshold,
     )
 
     save_coupling_results(
@@ -718,13 +1000,14 @@ if __name__ == "__main__":
     main(args)
 
 
+# from A to B: A is source, B is target
 # python map.py \
-#   --source-geom-file artifacts/mnist_geodesics/split42_digits012/model_B_ld8_seed12/align_geodesics_n100_random_selseed0_quadratic_lr005_S20_steps200.npz \
-#   --target-geom-file artifacts/mnist_geodesics/split42_digits012/model_A_ld8_seed1/align_geodesics_n100_random_selseed0_quadratic_lr005_S20_steps200.npz \
-#   --experiment-name split42_digits012_B12_to_A1 \
+#   --source-geom-file artifacts/mnist_geodesics/split42_digits012/model_A_ld8_seed1/align_geodesics_n100_random_selseed0_quadratic_lr005_S20_steps200.npz \
+#   --target-geom-file artifacts/mnist_geodesics/split42_digits012/model_B_ld8_seed12/align_geodesics_n100_random_selseed0_quadratic_lr005_S20_steps200.npz \
+#   --experiment-name split42_digits012_A1_to_B12 \
 #   --artifact-root artifacts/mnist \
 #   --plot-root plots/mnist \
-#   --epsilon 0.05 \
+#   --epsilon 0.008 \
 #   --threshold 1e-9 \
 #   --max-iter 200 \
 #   --r-bins 100 \

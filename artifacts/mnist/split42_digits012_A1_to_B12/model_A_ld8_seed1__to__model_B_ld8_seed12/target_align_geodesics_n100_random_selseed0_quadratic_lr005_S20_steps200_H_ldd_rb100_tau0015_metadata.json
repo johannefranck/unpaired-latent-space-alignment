@@ -1,0 +1,10 @@
+{
+  "experiment_name": "split42_digits012_A1_to_B12",
+  "role": "target",
+  "target_geodesic_file": "artifacts/mnist_geodesics/split42_digits012/model_B_ld8_seed12/align_geodesics_n100_random_selseed0_quadratic_lr005_S20_steps200.npz",
+  "n_points": 100,
+  "n_centers": 100,
+  "r_bins": 100,
+  "r_max": 25.92348861694336,
+  "tau": 0.015
+}

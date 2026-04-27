@@ -1,0 +1,22 @@
+{
+  "experiment_name": "split42_digits012_A1_to_B12",
+  "source_geom_file": "artifacts/mnist_geodesics/split42_digits012/model_A_ld8_seed1/align_geodesics_n100_random_selseed0_quadratic_lr005_S20_steps200.npz",
+  "target_geom_file": "artifacts/mnist_geodesics/split42_digits012/model_B_ld8_seed12/align_geodesics_n100_random_selseed0_quadratic_lr005_S20_steps200.npz",
+  "source_ldd_file": "artifacts/mnist/split42_digits012_A1_to_B12/model_A_ld8_seed1__to__model_B_ld8_seed12/source_align_geodesics_n100_random_selseed0_quadratic_lr005_S20_steps200_H_ldd_rb100_tau0015.npz",
+  "target_ldd_file": "artifacts/mnist/split42_digits012_A1_to_B12/model_A_ld8_seed1__to__model_B_ld8_seed12/target_align_geodesics_n100_random_selseed0_quadratic_lr005_S20_steps200_H_ldd_rb100_tau0015.npz",
+  "epsilon": 0.005,
+  "lr": 0.001,
+  "threshold": 1e-09,
+  "max_iter": 200,
+  "is_s2": false,
+  "source_num_points": 100,
+  "target_num_points": 100,
+  "M_shape": [
+    100,
+    100
+  ],
+  "P_shape": [
+    100,
+    100
+  ]
+}

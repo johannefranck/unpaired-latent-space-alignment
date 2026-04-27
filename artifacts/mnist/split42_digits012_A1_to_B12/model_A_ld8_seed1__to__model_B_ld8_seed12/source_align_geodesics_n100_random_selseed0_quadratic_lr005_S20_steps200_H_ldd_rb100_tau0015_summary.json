@@ -1,0 +1,28 @@
+{
+  "experiment_name": "split42_digits012_A1_to_B12",
+  "tau": 0.015,
+  "pairwise_signature_distances": {
+    "min": 0.013362382538616657,
+    "max": 0.33088788390159607,
+    "mean": 0.11713822931051254,
+    "std": 0.05939798057079315,
+    "q95": 0.22661858797073364,
+    "frac_under_tau": 0.000606060610152781
+  },
+  "deviation_from_mean_signature": {
+    "min": 0.024898827075958252,
+    "max": 0.20401713252067566,
+    "mean": 0.08585935831069946,
+    "std": 0.034325964748859406
+  },
+  "ldd_variation": {
+    "n_ldds": 100,
+    "r_bins": 100,
+    "rank_cap": 99,
+    "ldd_global_std": 0.09240300953388214,
+    "total_variance": 0.8624561429023743,
+    "effective_rank": 2.428194522857666,
+    "effective_rank_pct": 0.024527217402602688,
+    "top_eig_frac": 0.7608116269111633
+  }
+}

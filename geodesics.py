@@ -117,6 +117,31 @@ def flatten_observations(x):
 # Discrete energy and length
 # ============================================================
 
+
+def linear_path_energy(model, z0, z1, num_segments=20, device="cpu"):
+    """
+    Backwards-compatible helper for utils_GW.py.
+
+    Computes decoder-space length along the straight latent line
+    between z0 and z1.
+    """
+    z0 = z0.to(device)
+    z1 = z1.to(device)
+
+    times = torch.linspace(0.0, 1.0, num_segments + 1, device=device)
+    Zs = z0[None, :] + times[:, None] * (z1[None, :] - z0[None, :])
+
+    Xs = decode_to_observation(model, Zs)
+    Xs_flat = flatten_observations(Xs)
+
+    diffs = Xs_flat[1:] - Xs_flat[:-1]
+    seg_lengths = torch.sqrt(diffs.pow(2).sum(dim=1) + 1e-12)
+
+    length = seg_lengths.sum()
+    energy = (diffs.pow(2).sum(dim=1) / (times[1] - times[0])).sum()
+
+    return energy, length
+
 def compute_energy(curve, times, model):
     Zs = curve(times)
     Xs = decode_to_observation(model, Zs)
