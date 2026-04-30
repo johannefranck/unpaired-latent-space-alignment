@@ -1,0 +1,28 @@
+{
+  "experiment_name": "isotropic_vmf_A_to_B_rotseed123",
+  "tau": 0.015,
+  "pairwise_signature_distances": {
+    "min": 0.00032031777664087713,
+    "max": 0.49452435970306396,
+    "mean": 0.09880254417657852,
+    "std": 0.08161450177431107,
+    "q95": 0.2638220191001892,
+    "frac_under_tau": 0.1087653860449791
+  },
+  "deviation_from_mean_signature": {
+    "min": 0.009947431273758411,
+    "max": 0.4055182635784149,
+    "mean": 0.07311107218265533,
+    "std": 0.05351196974515915
+  },
+  "ldd_variation": {
+    "n_ldds": 2000,
+    "r_bins": 100,
+    "rank_cap": 100,
+    "ldd_global_std": 0.09059430658817291,
+    "total_variance": 0.8211436867713928,
+    "effective_rank": 1.2301400899887085,
+    "effective_rank_pct": 0.012301400899887086,
+    "top_eig_frac": 0.9531257748603821
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "experiment_name": "symmetric_vmf_A_to_B_rotseed123",
+  "role": "source",
+  "source_geodesic_file": "artifacts/s2_geodesics/symmetric_vmf/A_geodesics_n1998_seed1_rotseed123.npz",
+  "n_points": 1998,
+  "n_centers": 1998,
+  "r_bins": 100,
+  "r_max": 1.5,
+  "tau": 0.015
+}

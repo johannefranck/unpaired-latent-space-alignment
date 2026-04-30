@@ -1,0 +1,10 @@
+{
+  "experiment_name": "vmf_mixture_A_to_B_rotseed123",
+  "role": "target",
+  "target_geodesic_file": "artifacts/s2_geodesics/vmf_mixture/B_geodesics_n2000_seed1_rotseed123.npz",
+  "n_points": 2000,
+  "n_centers": 2000,
+  "r_bins": 100,
+  "r_max": 2.2379884719848633,
+  "tau": 0.015
+}

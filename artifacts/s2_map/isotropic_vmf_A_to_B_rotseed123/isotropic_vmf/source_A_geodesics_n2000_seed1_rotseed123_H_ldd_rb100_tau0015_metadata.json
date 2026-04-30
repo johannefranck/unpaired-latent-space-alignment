@@ -1,0 +1,10 @@
+{
+  "experiment_name": "isotropic_vmf_A_to_B_rotseed123",
+  "role": "source",
+  "source_geodesic_file": "artifacts/s2_geodesics/isotropic_vmf/A_geodesics_n2000_seed1_rotseed123.npz",
+  "n_points": 2000,
+  "n_centers": 2000,
+  "r_bins": 100,
+  "r_max": 0.7678611278533936,
+  "tau": 0.015
+}

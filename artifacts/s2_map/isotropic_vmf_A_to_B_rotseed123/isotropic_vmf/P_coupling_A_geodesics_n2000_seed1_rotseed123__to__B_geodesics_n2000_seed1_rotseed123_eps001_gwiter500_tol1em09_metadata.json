@@ -1,0 +1,22 @@
+{
+  "experiment_name": "isotropic_vmf_A_to_B_rotseed123",
+  "source_geom_file": "artifacts/s2_geodesics/isotropic_vmf/A_geodesics_n2000_seed1_rotseed123.npz",
+  "target_geom_file": "artifacts/s2_geodesics/isotropic_vmf/B_geodesics_n2000_seed1_rotseed123.npz",
+  "source_ldd_file": "artifacts/s2_map/isotropic_vmf_A_to_B_rotseed123/isotropic_vmf/source_A_geodesics_n2000_seed1_rotseed123_H_ldd_rb100_tau0015.npz",
+  "target_ldd_file": "artifacts/s2_map/isotropic_vmf_A_to_B_rotseed123/isotropic_vmf/target_B_geodesics_n2000_seed1_rotseed123_H_ldd_rb100_tau0015.npz",
+  "epsilon": 0.01,
+  "lr": 0.001,
+  "threshold": 1e-09,
+  "max_iter": 500,
+  "is_s2": true,
+  "source_num_points": 2000,
+  "target_num_points": 2000,
+  "M_shape": [
+    2000,
+    2000
+  ],
+  "P_shape": [
+    2000,
+    2000
+  ]
+}

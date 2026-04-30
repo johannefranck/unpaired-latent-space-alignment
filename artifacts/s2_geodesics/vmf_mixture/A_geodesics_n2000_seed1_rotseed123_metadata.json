@@ -1,0 +1,84 @@
+{
+  "experiment": "vmf_mixture",
+  "distribution": "vmf_mixture_like",
+  "mus": [
+    [
+      0.0,
+      0.0,
+      1.0
+    ],
+    [
+      1.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      1.0,
+      0.0
+    ]
+  ],
+  "kappas": [
+    10.0,
+    10.0,
+    10.0
+  ],
+  "weights": [
+    0.2,
+    0.7,
+    0.1
+  ],
+  "n_points_requested": 2000,
+  "n_points_used": 2000,
+  "n_centers_requested": 1000,
+  "n_centers_used": 1000,
+  "seed": 1,
+  "rotation_seed": 123,
+  "rotation_angles_xyz": [
+    0.7,
+    -0.4,
+    1.1
+  ],
+  "R_true": [
+    [
+      0.4177896944760956,
+      -0.7954267289691109,
+      0.43903085316532287
+    ],
+    [
+      0.8208563369208728,
+      0.12335209538780074,
+      -0.5576550319868777
+    ],
+    [
+      0.3894183423086505,
+      0.5933637833613874,
+      0.7044663052755917
+    ]
+  ],
+  "B_is_rotated_and_shuffled_A": true,
+  "num_points": 2000,
+  "z_shape": [
+    2000,
+    3
+  ],
+  "geodesic_shape": [
+    2000,
+    2000
+  ],
+  "role": "A",
+  "data_file": "data/s2/vmf_mixture/A_points_n2000_seed1_rotseed123.npz",
+  "geodesic_file": "artifacts/s2_geodesics/vmf_mixture/A_geodesics_n2000_seed1_rotseed123.npz",
+  "npz_keys_data": [
+    "Z",
+    "canonical_order",
+    "labels"
+  ],
+  "npz_keys_geodesic": [
+    "Z",
+    "C_g",
+    "canonical_order",
+    "labels",
+    "center_idx"
+  ]
+}

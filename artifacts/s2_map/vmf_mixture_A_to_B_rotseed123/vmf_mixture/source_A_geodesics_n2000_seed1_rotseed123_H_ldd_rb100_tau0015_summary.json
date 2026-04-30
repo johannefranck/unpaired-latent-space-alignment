@@ -1,0 +1,28 @@
+{
+  "experiment_name": "vmf_mixture_A_to_B_rotseed123",
+  "tau": 0.015,
+  "pairwise_signature_distances": {
+    "min": 0.0001225294836331159,
+    "max": 0.5369522571563721,
+    "mean": 0.20660580694675446,
+    "std": 0.1757587343454361,
+    "q95": 0.4567470848560333,
+    "frac_under_tau": 0.05715607851743698
+  },
+  "deviation_from_mean_signature": {
+    "min": 0.11243788152933121,
+    "max": 0.408184677362442,
+    "mean": 0.17640426754951477,
+    "std": 0.07519650459289551
+  },
+  "ldd_variation": {
+    "n_ldds": 2000,
+    "r_bins": 100,
+    "rank_cap": 100,
+    "ldd_global_std": 0.19175544381141663,
+    "total_variance": 3.6788573265075684,
+    "effective_rank": 1.416477084159851,
+    "effective_rank_pct": 0.014164770841598512,
+    "top_eig_frac": 0.9235056042671204
+  }
+}

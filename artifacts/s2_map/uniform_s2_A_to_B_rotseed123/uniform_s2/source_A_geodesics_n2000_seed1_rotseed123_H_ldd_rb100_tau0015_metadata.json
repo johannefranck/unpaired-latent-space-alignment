@@ -1,0 +1,10 @@
+{
+  "experiment_name": "uniform_s2_A_to_B_rotseed123",
+  "role": "source",
+  "source_geodesic_file": "artifacts/s2_geodesics/uniform_s2/A_geodesics_n2000_seed1_rotseed123.npz",
+  "n_points": 2000,
+  "n_centers": 2000,
+  "r_bins": 100,
+  "r_max": 3.140902042388916,
+  "tau": 0.015
+}

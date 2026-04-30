@@ -1,0 +1,70 @@
+{
+  "experiment": "symmetric_vmf",
+  "distribution": "symmetric_ring_vmf_like",
+  "mu": [
+    0.0,
+    0.0,
+    1.0
+  ],
+  "layer_thetas": [
+    0.25,
+    0.5,
+    0.75
+  ],
+  "n_points_requested": 2000,
+  "n_points_used": 1998,
+  "points_per_layer": 666,
+  "n_centers_requested": 1000,
+  "n_centers_used": 999,
+  "centers_per_layer": 333,
+  "used_centers": 999,
+  "seed": 1,
+  "rotation_seed": 123,
+  "rotation_angles_xyz": [
+    0.7,
+    -0.4,
+    1.1
+  ],
+  "R_true": [
+    [
+      0.4177896944760956,
+      -0.7954267289691109,
+      0.43903085316532287
+    ],
+    [
+      0.8208563369208728,
+      0.12335209538780074,
+      -0.5576550319868777
+    ],
+    [
+      0.3894183423086505,
+      0.5933637833613874,
+      0.7044663052755917
+    ]
+  ],
+  "B_is_rotated_and_shuffled_A": true,
+  "num_points": 1998,
+  "z_shape": [
+    1998,
+    3
+  ],
+  "geodesic_shape": [
+    1998,
+    1998
+  ],
+  "role": "B",
+  "data_file": "data/s2/symmetric_vmf/B_points_n1998_seed1_rotseed123.npz",
+  "geodesic_file": "artifacts/s2_geodesics/symmetric_vmf/B_geodesics_n1998_seed1_rotseed123.npz",
+  "npz_keys_data": [
+    "Z",
+    "canonical_order",
+    "labels"
+  ],
+  "npz_keys_geodesic": [
+    "Z",
+    "C_g",
+    "canonical_order",
+    "labels",
+    "center_idx"
+  ]
+}

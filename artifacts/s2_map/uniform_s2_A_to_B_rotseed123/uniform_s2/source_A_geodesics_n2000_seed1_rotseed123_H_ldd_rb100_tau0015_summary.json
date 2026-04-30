@@ -1,0 +1,28 @@
+{
+  "experiment_name": "uniform_s2_A_to_B_rotseed123",
+  "tau": 0.015,
+  "pairwise_signature_distances": {
+    "min": 0.00027399903046898544,
+    "max": 0.039212845265865326,
+    "mean": 0.015247318893671036,
+    "std": 0.00806393288075924,
+    "q95": 0.030856715515255928,
+    "frac_under_tau": 0.5651845932006836
+  },
+  "deviation_from_mean_signature": {
+    "min": 0.002858132356777787,
+    "max": 0.020634008571505547,
+    "mean": 0.011253103613853455,
+    "std": 0.00469661271199584
+  },
+  "ldd_variation": {
+    "n_ldds": 2000,
+    "r_bins": 100,
+    "rank_cap": 100,
+    "ldd_global_std": 0.01219341903924942,
+    "total_variance": 0.014875388704240322,
+    "effective_rank": 2.1579532623291016,
+    "effective_rank_pct": 0.021579532623291015,
+    "top_eig_frac": 0.8530182242393494
+  }
+}

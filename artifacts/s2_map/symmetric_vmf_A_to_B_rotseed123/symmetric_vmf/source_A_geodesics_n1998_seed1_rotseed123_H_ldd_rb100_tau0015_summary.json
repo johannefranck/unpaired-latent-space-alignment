@@ -1,0 +1,28 @@
+{
+  "experiment_name": "symmetric_vmf_A_to_B_rotseed123",
+  "tau": 0.015,
+  "pairwise_signature_distances": {
+    "min": 0.0,
+    "max": 0.23471702635288239,
+    "mean": 0.10528320074081421,
+    "std": 0.08737251907587051,
+    "q95": 0.23471702635288239,
+    "frac_under_tau": 0.33299949765205383
+  },
+  "deviation_from_mean_signature": {
+    "min": 0.018577171489596367,
+    "max": 0.12335594743490219,
+    "mean": 0.08458167314529419,
+    "std": 0.04692131653428078
+  },
+  "ldd_variation": {
+    "n_ldds": 1998,
+    "r_bins": 100,
+    "rank_cap": 100,
+    "ldd_global_std": 0.09671901911497116,
+    "total_variance": 0.93592768907547,
+    "effective_rank": 1.0634855031967163,
+    "effective_rank_pct": 0.010634855031967164,
+    "top_eig_frac": 0.9887840151786804
+  }
+}

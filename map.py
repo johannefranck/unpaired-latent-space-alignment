@@ -6,6 +6,7 @@ import torch
 import matplotlib.pyplot as plt
 import ot
 
+from matplotlib.colors import to_rgb
 from sklearn.decomposition import PCA
 
 from utils_GW import ZukoFlowMap
@@ -61,6 +62,8 @@ def load_geom_file(path):
         payload["x"] = torch.from_numpy(data["x"]).float()
     if "y" in data.files:
         payload["y"] = torch.from_numpy(data["y"]).long()
+    elif "labels" in data.files:
+        payload["y"] = torch.from_numpy(data["labels"]).long()
     if "chosen_idx_within_latent_file" in data.files:
         payload["chosen_idx_within_latent_file"] = torch.from_numpy(
             data["chosen_idx_within_latent_file"]
@@ -272,7 +275,7 @@ def normalize_distance_matrix(C):
         C = C / max_val
     return C
 
-def init_sinkhorn(M, init_epsilon=0.02, num_itermax=5000):
+def init_sinkhorn(M, init_epsilon=0.1, num_itermax=5000):
     n_a, n_b = M.shape
     a, b = uniform_marginals(n_a, n_b)
 
@@ -359,6 +362,9 @@ def train_flow_target_to_source(
 
     best_loss = float("inf")
     best_state = None
+    patience = 80
+    min_delta = 1e-4
+    wait = 0
 
     model.train()
     for epoch in range(epochs):
@@ -375,12 +381,22 @@ def train_flow_target_to_source(
         loss.backward()
         optimizer.step()
 
-        if loss.item() < best_loss:
-            best_loss = loss.item()
+        current_loss = loss.item()
+
+        if current_loss < best_loss - min_delta:
+            best_loss = current_loss
             best_state = {
                 k: v.detach().cpu().clone()
                 for k, v in model.state_dict().items()
             }
+            wait = 0
+        else:
+            wait += 1
+
+        if wait >= patience:
+            if verbose:
+                print(f"[flow target->source] early stop at epoch={epoch} best={best_loss:.6f}")
+            break
 
         if verbose and (epoch % 200 == 0):
             print(f"[flow target->source] epoch={epoch} loss={loss.item():.6f} best={best_loss:.6f}")
@@ -427,7 +443,7 @@ def compute_map_neural_GM(
 
     # phase 1
     M = compute_M_distance(H_a, H_b)
-    pi0 = init_sinkhorn(M, init_epsilon=0.02, num_itermax=5000)
+    pi0 = init_sinkhorn(M, init_epsilon=0.1, num_itermax=5000)
 
     # normalize geometry before GW
     C_a_gw = normalize_distance_matrix(C_a)
@@ -450,7 +466,7 @@ def compute_map_neural_GM(
         hidden_features=(64, 64),
         bins=8,
         lr=lr,
-        epochs=2000,
+        epochs=800,
         device=device,
         verbose=True,
     )
@@ -600,6 +616,9 @@ def plot_ldd_spectrum(H, save_path, title):
     plt.savefig(save_path, dpi=150)
     plt.close()
 
+def darken_color(color, factor=0.55):
+    rgb = np.array(to_rgb(color), dtype=float)
+    return tuple(np.clip(factor * rgb, 0.0, 1.0))
 
 def plot_source_and_mapped_2d(
     Z_source,
@@ -632,7 +651,8 @@ def plot_source_and_mapped_2d(
     plt.figure(figsize=(5, 5))
 
     for c in classes:
-        col = get_single_color(int(c + 4))
+        col_a = get_single_color(int(c + 4))
+        col_b = darken_color(col_a, factor=0.55)
 
         idx_a = y_source == c
         idx_b = y_target == c
@@ -642,7 +662,7 @@ def plot_source_and_mapped_2d(
             A[idx_a, 1],
             s=24,
             alpha=0.75,
-            color=col,
+            color=col_a,
             marker="o",
             label=f"A class {c}",
         )
@@ -652,7 +672,7 @@ def plot_source_and_mapped_2d(
             B[idx_b, 1],
             s=32,
             alpha=0.95,
-            color=col,
+            color=col_b,
             marker="x",
             label=f"T(B) class {c}",
         )
@@ -666,6 +686,104 @@ def plot_source_and_mapped_2d(
     plt.close()
 
 
+def plot_source_and_mapped_3d_s2(
+    Z_source,
+    Z_target,
+    flow_model,
+    source_geom,
+    target_geom,
+    save_path,
+    device="cpu",
+):
+    if Z_source.shape[1] != 3 or Z_target.shape[1] != 3:
+        raise ValueError("S2 3D plot requires 3-dimensional points.")
+
+    flow_model = flow_model.to(device)
+    flow_model.eval()
+
+    with torch.no_grad():
+        Z_target_mapped = flow_model(Z_target.to(device)).cpu()
+
+    A = Z_source.cpu().numpy()
+    B = Z_target_mapped.cpu().numpy()
+
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    fig = plt.figure(figsize=(6, 6))
+    ax = fig.add_subplot(111, projection="3d")
+
+    has_labels = "y" in source_geom and "y" in target_geom
+
+    if has_labels:
+        y_source = source_geom["y"].cpu().numpy()
+        y_target = target_geom["y"].cpu().numpy()
+        classes = np.unique(np.concatenate([y_source, y_target]))
+
+                # plot A first
+        for c in classes:
+            col_a = get_single_color(int(c + 4))
+            idx_a = y_source == c
+
+            ax.scatter(
+                A[idx_a, 0], A[idx_a, 1], A[idx_a, 2],
+                s=18,
+                alpha=0.65,
+                color=col_a,
+                marker="o",
+                depthshade=False,
+                label=f"A {c}",
+            )
+
+        # plot mapped B as black/dark points instead of x
+        for c in classes:
+            col_a = get_single_color(int(c + 4))
+            col_b = darken_color(col_a, factor=0.35)
+            idx_b = y_target == c
+
+            ax.scatter(
+                B[idx_b, 0], B[idx_b, 1], B[idx_b, 2],
+                s=26,
+                alpha=1.0,
+                color=col_b,
+                marker=".",
+                depthshade=False,
+                label=f"T(B) {c}",
+            )
+
+    else:
+        col_a = get_single_color(0)
+        col_b = darken_color(col_a, factor=0.35)
+
+        ax.scatter(
+            A[:, 0], A[:, 1], A[:, 2],
+            s=10,
+            alpha=0.22,
+            color=col_a,
+            marker="o",
+            depthshade=False,
+            label="A",
+        )
+
+        ax.scatter(
+            B[:, 0], B[:, 1], B[:, 2],
+            s=85,
+            alpha=1.0,
+            color=col_b,
+            marker="x",
+            linewidths=2.5,
+            depthshade=False,
+            label="T(B)",
+        )
+
+    ax.set_xlabel("z1")
+    ax.set_ylabel("z2")
+    ax.set_zlabel("z3")
+    ax.set_title("S2: source vs mapped target")
+
+    ax.legend(fontsize=7)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=200)
+    plt.close()
 
 
 # --------------------------------------------------
@@ -884,20 +1002,37 @@ def main(args):
     )
 
     # evaluating plot 2d
-    plot_source_and_mapped_2d(
-        Z_source=Z_a,
-        Z_target=Z_b,
-        flow_model=result["flow_target_to_source"],
-        source_geom=source_geom,
-        target_geom=target_geom,
-        save_path=os.path.join(
-            args.plot_root,
-            args.experiment_name,
-            model_folder,
-            f"mapped_target_to_source_2d_eps{str(args.epsilon).replace('.', '')}.png",
-        ),
-        device=device,
-    )
+    if "y" in source_geom and "y" in target_geom:
+        plot_source_and_mapped_2d(
+            Z_source=Z_a,
+            Z_target=Z_b,
+            flow_model=result["flow_target_to_source"],
+            source_geom=source_geom,
+            target_geom=target_geom,
+            save_path=os.path.join(
+                args.plot_root,
+                args.experiment_name,
+                model_folder,
+                f"mapped_target_to_source_2d_eps{str(args.epsilon).replace('.', '')}.png",
+            ),
+            device=device,
+        )
+
+    if args.is_s2:
+        plot_source_and_mapped_3d_s2(
+            Z_source=Z_a,
+            Z_target=Z_b,
+            flow_model=result["flow_target_to_source"],
+            source_geom=source_geom,
+            target_geom=target_geom,
+            save_path=os.path.join(
+                args.plot_root,
+                args.experiment_name,
+                model_folder,
+                f"mapped_target_to_source_3d_s2_eps{str(args.epsilon).replace('.', '')}.png",
+            ),
+            device=device,
+        )
 
     print("M min/max/std:", result["M"].min().item(), result["M"].max().item(), result["M"].std().item())
     print("pi0 min/max/std:", result["pi0"].min().item(), result["pi0"].max().item(), result["pi0"].std().item())
@@ -951,13 +1086,14 @@ def main(args):
 
     sorted_plot_path = map_plot_path.replace(".png", "_sorted_by_class.png")
 
-    plot_P_matrix_sorted(
-        result["P"],
-        source_geom,
-        target_geom,
-        sorted_plot_path,
-        title=f"P coupling: {args.experiment_name}",
-    )
+    if "y" in source_geom and "y" in target_geom:
+        plot_P_matrix_sorted(
+            result["P"],
+            source_geom,
+            target_geom,
+            sorted_plot_path,
+            title=f"P coupling: {args.experiment_name}",
+        )
 
     print(f"Loaded source geodesics: {args.source_geom_file}")
     print(f"Loaded target geodesics: {args.target_geom_file}")
@@ -968,7 +1104,8 @@ def main(args):
     print(f"Saved coupling arrays to: {map_npz_path}")
     print(f"Saved coupling metadata to: {map_meta_path}")
     print(f"Saved coupling plot to: {map_plot_path}")
-    print(f"Saved sorted coupling plot to: {sorted_plot_path}")
+    if "y" in source_geom and "y" in target_geom:
+        print(f"Saved sorted coupling plot to: {sorted_plot_path}")
     print(f"M shape: {tuple(result['M'].shape)}")
     print(f"pi0 shape: {tuple(result['pi0'].shape)}")
     print(f"P shape: {tuple(result['P'].shape)}")
@@ -1012,3 +1149,18 @@ if __name__ == "__main__":
 #   --max-iter 200 \
 #   --r-bins 100 \
 #   --tau 0.015
+
+
+# Sphere2
+# python map.py \
+#   --source-geom-file artifacts/s2_geodesics/vmf_mixture/A_geodesics_n2000_seed1_rotseed123.npz \
+#   --target-geom-file artifacts/s2_geodesics/vmf_mixture/B_geodesics_n2000_seed1_rotseed123.npz \
+#   --experiment-name vmf_mixture_A_to_B_rotseed123 \
+#   --artifact-root artifacts/s2_map \
+#   --plot-root plots/s2 \
+#   --epsilon 0.008 \
+#   --threshold 1e-9 \
+#   --max-iter 200 \
+#   --r-bins 100 \
+#   --tau 0.015 \
+#   --is-s2

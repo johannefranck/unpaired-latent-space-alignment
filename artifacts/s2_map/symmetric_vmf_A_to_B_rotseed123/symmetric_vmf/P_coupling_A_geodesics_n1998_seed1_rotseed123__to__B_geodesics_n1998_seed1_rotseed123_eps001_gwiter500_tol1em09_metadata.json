@@ -1,0 +1,22 @@
+{
+  "experiment_name": "symmetric_vmf_A_to_B_rotseed123",
+  "source_geom_file": "artifacts/s2_geodesics/symmetric_vmf/A_geodesics_n1998_seed1_rotseed123.npz",
+  "target_geom_file": "artifacts/s2_geodesics/symmetric_vmf/B_geodesics_n1998_seed1_rotseed123.npz",
+  "source_ldd_file": "artifacts/s2_map/symmetric_vmf_A_to_B_rotseed123/symmetric_vmf/source_A_geodesics_n1998_seed1_rotseed123_H_ldd_rb100_tau0015.npz",
+  "target_ldd_file": "artifacts/s2_map/symmetric_vmf_A_to_B_rotseed123/symmetric_vmf/target_B_geodesics_n1998_seed1_rotseed123_H_ldd_rb100_tau0015.npz",
+  "epsilon": 0.01,
+  "lr": 0.001,
+  "threshold": 1e-09,
+  "max_iter": 500,
+  "is_s2": true,
+  "source_num_points": 1998,
+  "target_num_points": 1998,
+  "M_shape": [
+    1998,
+    1998
+  ],
+  "P_shape": [
+    1998,
+    1998
+  ]
+}

@@ -122,6 +122,37 @@ def sample_vmf_mixture_approx(mus, kappas, weights, n):
     return torch.as_tensor(X, dtype=torch.float32), torch.as_tensor(comp_ids, dtype=torch.long)
 
 
+
+def rotation_matrix_xyz(rx, ry, rz):
+    cx, sx = np.cos(rx), np.sin(rx)
+    cy, sy = np.cos(ry), np.sin(ry)
+    cz, sz = np.cos(rz), np.sin(rz)
+
+    Rx = np.array([
+        [1, 0, 0],
+        [0, cx, -sx],
+        [0, sx, cx],
+    ])
+
+    Ry = np.array([
+        [cy, 0, sy],
+        [0, 1, 0],
+        [-sy, 0, cy],
+    ])
+
+    Rz = np.array([
+        [cz, -sz, 0],
+        [sz, cz, 0],
+        [0, 0, 1],
+    ])
+
+    return Rz @ Ry @ Rx
+
+
+def apply_rotation(Z, R):
+    R_t = torch.tensor(R, dtype=Z.dtype)
+    return Z @ R_t.T
+
 # ============================================================
 # Center utilities
 # ============================================================
@@ -269,54 +300,138 @@ def build_experiment(args):
     return Z, C_g, labels, center_idx, metadata
 
 
-def main(args):
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
-
-    artifact_dir = os.path.join(args.artifact_root, args.experiment)
-    os.makedirs(artifact_dir, exist_ok=True)
-
-    Z, C_g, labels, center_idx, metadata = build_experiment(args)
-
+def save_one_role(
+    role,
+    Z,
+    C_g,
+    labels,
+    center_idx,
+    canonical_order,
+    metadata,
+    args,
+):
     n_points_used = int(Z.shape[0])
 
-    canonical_order = torch.arange(n_points_used, dtype=torch.long)
+    data_dir = os.path.join(args.data_root, args.experiment)
+    geodesic_dir = os.path.join(args.geodesic_root, args.experiment)
 
-    filename = f"points_and_geodesics_n{n_points_used}_seed{args.seed}.npz"
-    out_path = os.path.join(artifact_dir, filename)
+    os.makedirs(data_dir, exist_ok=True)
+    os.makedirs(geodesic_dir, exist_ok=True)
 
-    save_dict = {
+    data_path = os.path.join(
+        data_dir,
+        f"{role}_points_n{n_points_used}_seed{args.seed}_rotseed{args.rotation_seed}.npz",
+    )
+
+    geodesic_path = os.path.join(
+        geodesic_dir,
+        f"{role}_geodesics_n{n_points_used}_seed{args.seed}_rotseed{args.rotation_seed}.npz",
+    )
+
+    data_save = {
+        "Z": Z.cpu().numpy().astype(np.float32),
+        "canonical_order": canonical_order.cpu().numpy().astype(np.int64),
+    }
+
+    geodesic_save = {
         "Z": Z.cpu().numpy().astype(np.float32),
         "C_g": C_g.cpu().numpy().astype(np.float32),
         "canonical_order": canonical_order.cpu().numpy().astype(np.int64),
     }
 
     if labels is not None:
-        save_dict["labels"] = labels.cpu().numpy().astype(np.int64)
+        data_save["labels"] = labels.cpu().numpy().astype(np.int64)
+        geodesic_save["labels"] = labels.cpu().numpy().astype(np.int64)
 
     if center_idx is not None:
-        save_dict["center_idx"] = center_idx.cpu().numpy().astype(np.int64)
+        geodesic_save["center_idx"] = center_idx.cpu().numpy().astype(np.int64)
 
-    np.savez_compressed(out_path, **save_dict)
+    np.savez_compressed(data_path, **data_save)
+    np.savez_compressed(geodesic_path, **geodesic_save)
+
+    role_metadata = dict(metadata)
+    role_metadata["role"] = role
+    role_metadata["data_file"] = data_path
+    role_metadata["geodesic_file"] = geodesic_path
+    role_metadata["npz_keys_data"] = list(data_save.keys())
+    role_metadata["npz_keys_geodesic"] = list(geodesic_save.keys())
+
+    with open(data_path.replace(".npz", "_metadata.json"), "w") as f:
+        json.dump(role_metadata, f, indent=2)
+
+    with open(geodesic_path.replace(".npz", "_metadata.json"), "w") as f:
+        json.dump(role_metadata, f, indent=2)
+
+    print(f"Saved {role} data to: {data_path}")
+    print(f"Saved {role} geodesics to: {geodesic_path}")
+
+
+def main(args):
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+
+    Z_A, C_A, labels_A, center_idx_A, metadata = build_experiment(args)
+
+    n_points_used = int(Z_A.shape[0])
+    canonical_A = torch.arange(n_points_used, dtype=torch.long)
+
+    R_true = rotation_matrix_xyz(
+        args.rotation_angles[0],
+        args.rotation_angles[1],
+        args.rotation_angles[2],
+    )
+
+    Z_B = apply_rotation(Z_A, R_true)
+
+    torch.manual_seed(args.rotation_seed)
+    perm_B = torch.randperm(n_points_used)
+
+    Z_B = Z_B[perm_B]
+    labels_B = None if labels_A is None else labels_A[perm_B]
+    canonical_B = canonical_A[perm_B]
+
+    C_B = compute_geodesics_S2(Z_B)
+
+    center_idx_B = None
+    if center_idx_A is not None:
+        center_idx_B = torch.arange(min(args.n_centers, n_points_used), dtype=torch.long)
 
     metadata["seed"] = int(args.seed)
-    metadata["artifact_file"] = out_path
-    metadata["z_shape"] = tuple(Z.shape)
-    metadata["geodesic_shape"] = tuple(C_g.shape)
+    metadata["rotation_seed"] = int(args.rotation_seed)
+    metadata["rotation_angles_xyz"] = list(map(float, args.rotation_angles))
+    metadata["R_true"] = R_true.tolist()
+    metadata["B_is_rotated_and_shuffled_A"] = True
     metadata["num_points"] = n_points_used
-    metadata["has_canonical_order"] = True
-    metadata["npz_keys"] = list(save_dict.keys())
+    metadata["z_shape"] = tuple(Z_A.shape)
+    metadata["geodesic_shape"] = tuple(C_A.shape)
 
-    meta_path = out_path.replace(".npz", "_metadata.json")
-    with open(meta_path, "w") as f:
-        json.dump(metadata, f, indent=2)
+    save_one_role(
+        role="A",
+        Z=Z_A,
+        C_g=C_A,
+        labels=labels_A,
+        center_idx=center_idx_A,
+        canonical_order=canonical_A,
+        metadata=metadata,
+        args=args,
+    )
 
-    print(f"Saved S2 artifact to: {out_path}")
-    print(f"Saved metadata to: {meta_path}")
-    print(f"Z shape: {tuple(Z.shape)}")
-    print(f"C_g shape: {tuple(C_g.shape)}")
-    if center_idx is not None:
-        print(f"Number of centers: {len(center_idx)}")
+    save_one_role(
+        role="B",
+        Z=Z_B,
+        C_g=C_B,
+        labels=labels_B,
+        center_idx=center_idx_B,
+        canonical_order=canonical_B,
+        metadata=metadata,
+        args=args,
+    )
+
+    print("Saved controlled S2 pair.")
+    print("A = sampled points")
+    print("B = rotated and shuffled A")
+    print("R_true:")
+    print(R_true)
 
 
 if __name__ == "__main__":
@@ -329,21 +444,33 @@ if __name__ == "__main__":
         choices=["uniform_s2", "symmetric_vmf", "isotropic_vmf", "vmf_mixture"],
     )
 
-    parser.add_argument("--artifact-root", type=str, default="artifacts/s2")
     parser.add_argument("--n-points", type=int, default=2000)
     parser.add_argument("--n-centers", type=int, default=None)
     parser.add_argument("--seed", type=int, default=0)
 
+    parser.add_argument("--data-root", type=str, default="data/s2")
+    parser.add_argument("--geodesic-root", type=str, default="artifacts/s2_geodesics")
+
     parser.add_argument("--kappa", type=float, default=10.0)
     parser.add_argument("--layer-thetas", type=float, nargs="+", default=[0.25, 0.50, 0.75])
+
+    parser.add_argument("--rotation-seed", type=int, default=123)
+    parser.add_argument(
+        "--rotation-angles",
+        type=float,
+        nargs=3,
+        default=[0.7, -0.4, 1.1],
+    )
 
     args = parser.parse_args()
     main(args)
 
 
 # python build_S2_artifacts.py \
-#   --experiment uniform_s2 \
-#   --artifact-root artifacts/s2 \
+#   --experiment vmf_mixture \
+#   --data-root data/s2 \
+#   --geodesic-root artifacts/s2_geodesics \
 #   --n-points 2000 \
 #   --n-centers 1000 \
-#   --seed 0
+#   --seed 1 \
+#   --rotation-seed 123
