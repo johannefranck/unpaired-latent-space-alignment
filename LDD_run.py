@@ -40,7 +40,14 @@ def LDD(Z, C_g, r_bins, r_max, n_centers=None, center_idx=None):
     C_centers[row_idx, center_idx] = torch.inf
 
     # Define the radius grid.
-    r = torch.linspace(0.0, float(r_max), steps=r_bins, dtype=torch.float32)
+    # r = torch.linspace(0.0, float(r_max), steps=r_bins, dtype=torch.float32) # linear spaced r bins
+    r_min = 1e-4
+    r = torch.logspace(
+        np.log10(r_min),
+        np.log10(float(r_max)),
+        steps=r_bins,
+        dtype=torch.float32,
+    )
 
     # Compare every center-to-point distance with every radius bin at once.
     indicators = (C_centers[:, :, None] <= r[None, None, :]).float()

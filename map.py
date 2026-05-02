@@ -3,6 +3,7 @@ import json
 import argparse
 import numpy as np
 import torch
+import torch.nn as nn
 import matplotlib.pyplot as plt
 import ot
 
@@ -326,6 +327,36 @@ def coupling_euclidean_loss_target_to_source(Z_source, Z_target_mapped, P):
     sqdist = (diff ** 2).sum(dim=2)
     return (P * sqdist).sum()
 
+
+class RotationMap(nn.Module):
+    """
+    Rotation map T(z) = Rz with R in SO(3).
+    Parameterized via skew-symmetric matrix exponential.
+    """
+    def __init__(self):
+        super().__init__()
+        self.omega = nn.Parameter(torch.zeros(3))  # rotation vector
+
+    def _skew(self, w):
+        wx, wy, wz = w
+        K = torch.zeros(3, 3, device=w.device, dtype=w.dtype)
+        K[0, 1] = -wz
+        K[0, 2] =  wy
+        K[1, 0] =  wz
+        K[1, 2] = -wx
+        K[2, 0] = -wy
+        K[2, 1] =  wx
+        return K
+
+    def rotation_matrix(self):
+        K = self._skew(self.omega)
+        return torch.matrix_exp(K)  # guarantees in SO(3)
+
+    def forward(self, z):
+        R = self.rotation_matrix()
+        z_rot = z @ R.T
+        return z_rot / (z_rot.norm(dim=1, keepdim=True) + 1e-12) # keep on sphere
+
 def train_flow_target_to_source(
     Z_source,
     Z_target,
@@ -406,6 +437,40 @@ def train_flow_target_to_source(
 
     return model
 
+def train_rotation_target_to_source(
+    Z_source,
+    Z_target,
+    P,
+    lr=1e-2,
+    epochs=1000,
+    device="cpu",
+    verbose=False,
+):
+    Z_source_t = torch.tensor(Z_source, dtype=torch.float32, device=device)
+    Z_target_t = torch.tensor(Z_target, dtype=torch.float32, device=device)
+    P_t = torch.tensor(P, dtype=torch.float32, device=device)
+
+    model = RotationMap().to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    for epoch in range(epochs):
+        optimizer.zero_grad()
+
+        Z_target_mapped = model(Z_target_t)
+
+        loss = coupling_euclidean_loss_target_to_source(
+            Z_source=Z_source_t,
+            Z_target_mapped=Z_target_mapped,
+            P=P_t,
+        )
+
+        loss.backward()
+        optimizer.step()
+
+        if verbose and epoch % 200 == 0:
+            print(f"[rotation] epoch={epoch} loss={loss.item():.6f}")
+
+    return model
 
 def compute_map_neural_GM(
     Z_a,
@@ -458,24 +523,35 @@ def compute_map_neural_GM(
     # phase 3-4:
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    flow_model = train_flow_target_to_source(
-        Z_source=Z_a.cpu().numpy(),   # A, decoder/reference space
-        Z_target=Z_b.cpu().numpy(),   # B, points to map
-        P=P.cpu().numpy(),            # rows=A, cols=B
-        transforms=4,
-        hidden_features=(64, 64),
-        bins=8,
-        lr=lr,
-        epochs=800,
-        device=device,
-        verbose=True,
-    )
+    if is_s2:
+        map_model = train_rotation_target_to_source(
+            Z_source=Z_a.cpu().numpy(),
+            Z_target=Z_b.cpu().numpy(),
+            P=P.cpu().numpy(),
+            lr=lr,
+            epochs=400,
+            device=device,
+            verbose=True,
+        )
+    else:
+        map_model = train_flow_target_to_source(
+            Z_source=Z_a.cpu().numpy(),
+            Z_target=Z_b.cpu().numpy(),
+            P=P.cpu().numpy(),
+            transforms=4,
+            hidden_features=(64, 64),
+            bins=8,
+            lr=lr,
+            epochs=800,
+            device=device,
+            verbose=True,
+        )
 
     return {
         "M": M,
         "pi0": pi0,
         "P": P,
-        "flow_target_to_source": flow_model,
+        "flow_target_to_source": map_model, 
     }
 
 

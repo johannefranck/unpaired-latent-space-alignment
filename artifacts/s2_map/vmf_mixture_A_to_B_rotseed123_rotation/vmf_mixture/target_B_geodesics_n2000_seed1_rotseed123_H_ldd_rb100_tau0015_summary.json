@@ -1,0 +1,28 @@
+{
+  "experiment_name": "vmf_mixture_A_to_B_rotseed123_rotation",
+  "tau": 0.015,
+  "pairwise_signature_distances": {
+    "min": 0.0001225294836331159,
+    "max": 0.5369522571563721,
+    "mean": 0.20660580694675446,
+    "std": 0.1757587492465973,
+    "q95": 0.4567470848560333,
+    "frac_under_tau": 0.057156577706336975
+  },
+  "deviation_from_mean_signature": {
+    "min": 0.112437903881073,
+    "max": 0.408184677362442,
+    "mean": 0.17640426754951477,
+    "std": 0.07519648969173431
+  },
+  "ldd_variation": {
+    "n_ldds": 2000,
+    "r_bins": 100,
+    "rank_cap": 100,
+    "ldd_global_std": 0.19175544381141663,
+    "total_variance": 3.6788549423217773,
+    "effective_rank": 1.4164689779281616,
+    "effective_rank_pct": 0.014164689779281616,
+    "top_eig_frac": 0.923505961894989
+  }
+}
